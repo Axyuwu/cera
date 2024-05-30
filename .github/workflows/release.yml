@@ -1,0 +1,39 @@
+name: Compile test
+
+on:
+  push:
+    branches: [ "*" ]
+  pull_request:
+    branches: [ "master" ]
+
+jobs:
+  release-linux:
+    name: release linux
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@master
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Compile
+        run: |
+          rustup target add x86_64-unknown-linux-gnu
+          cargo build --release --target x86_64-unknown-linux-gnu
+      - name: Publish packaged artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: x86_64-unknown-linux-gnu-release
+          path: target/x86_64-unknown-linux-gnu/release/
+  release-windows:
+    name: release windows
+    runs-on: windows-2022
+    steps:
+      - uses: actions/checkout@master
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Compile
+        run: |
+          rustup target add x86_64-pc-windows-msvc
+          cargo build --release --target x86_64-pc-windows-msvc
+      - name: Publish packaged artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: x86_64-pc-windows-msvc-release
+          path: target/x86_64-pc-windows-msvc/release/
