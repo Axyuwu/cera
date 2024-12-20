@@ -1,5 +1,3 @@
 [workspace]
 
-members = [
-    "cera_bytecode"
-]
+members = []
