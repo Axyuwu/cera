@@ -1,3 +1,7 @@
-[workspace]
+[package]
+name = "cera"
+version = "0.1.0"
+edition = '2021'
 
-members = []
+[dependencies]
+cera_bytecode = { path = "crates/cera_bytecode" }

@@ -1,0 +1,8 @@
+[package]
+name = "cera_bytecode"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+ahash = "0.8.11"
+
