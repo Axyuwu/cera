@@ -1,7 +1,8 @@
 { pkgs }:
+let manifest = (pkgs.lib.importTOML ./Cargo.toml).package; in 
 pkgs.rustPlatform.buildRustPackage {
-  pname = "cera";
-  version = "0.1.0";
+  pname = manifest.name;
+  version = manifest.version;
 
   cargoLock.lockFile = ./Cargo.lock;
 
