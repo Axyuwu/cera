@@ -4,4 +4,3 @@ version = "0.1.0"
 edition = '2021'
 
 [dependencies]
-cera_bytecode = { path = "crates/cera_bytecode" }
