@@ -1,13 +1,8 @@
-use ast::AST;
-use tokens::tokenize;
+use parse::Module;
 
-mod ast;
-mod tokens;
+mod parse;
 
 fn main() {
-    let input = r#"test (hello : world) (() heya, bhellow.vorld; "hey hey!" "hey \"world\"")"#;
-    let tokens = tokenize(input).unwrap();
-    dbg!(&tokens);
-    let ast = AST::parse(tokens).unwrap();
-    dbg!(&ast);
+    let str = r#"helo (hai hello.world . wow (test; test2 hai.hello) ("hellow; \"world\"";))"#;
+    println!("{:?}", Module::parse(str).unwrap());
 }
