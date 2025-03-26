@@ -1,126 +1,81 @@
-use std::num::{NonZero, NonZeroUsize};
-
 #[derive(Debug)]
-pub struct Module {
-    tokens: Vec<Token>,
-}
-
-#[derive(Debug)]
-pub enum Token {
+pub enum Atom {
+    Unit,
+    Apply(Box<Apply>),
     Identifier(Box<str>),
     String(Box<str>),
-    Field(Box<str>),
-    Group { len: usize },
-    Line { len: usize },
+}
+
+/// Left-associative
+#[derive(Debug)]
+struct Apply {
+    lhs: Atom,
+    rhs: Atom,
 }
 
 #[derive(Debug)]
 pub enum ParseError {
     InvalidChar(char),
     InvalidEscape(char),
-    InvalidCharAfterDot(char),
     UnclosedQuote,
     UnclosedParen,
     UnopenedParen,
-    TrailingDot,
 }
 
 pub type ParseResult<T> = Result<T, ParseError>;
 
-impl Module {
-    pub fn parse(mut str: &str) -> ParseResult<Self> {
-        #[derive(Debug)]
-        struct StackFrame {
-            group_idx: usize,
-            line_idx: Option<NonZeroUsize>,
-        }
-        fn end_line(stack: &mut Vec<StackFrame>, tokens: &mut Vec<Token>) {
-            let Some(idx) = stack.last().unwrap().line_idx.map(NonZero::get) else {
-                return;
-            };
-            let len = tokens.len() - (idx + 1);
-            if len == 0 {
-                tokens.pop();
-                return;
+impl Atom {
+    pub fn parse_module(module: &str) -> ParseResult<Self> {
+        fn push_atom(frame_atom: &mut Option<Atom>, rhs: Atom) {
+            *frame_atom = match frame_atom {
+                None => Some(rhs),
+                _ => frame_atom
+                    .take()
+                    .map(|lhs| Atom::Apply(Apply { lhs, rhs }.into())),
             }
-            tokens[idx] = Token::Line { len };
-        }
-        fn pop_frame<const FINAL: bool>(
-            stack: &mut Vec<StackFrame>,
-            tokens: &mut Vec<Token>,
-        ) -> ParseResult<()> {
-            if (stack.len() == 1) ^ FINAL {
-                return Err(if FINAL {
-                    ParseError::UnopenedParen
-                } else {
-                    ParseError::UnclosedParen
-                });
-            }
-
-            end_line(stack, tokens);
-
-            let idx = stack.pop().unwrap().group_idx;
-
-            let len = tokens.len() - (idx + 1);
-
-            tokens[idx] = Token::Group { len };
-
-            Ok(())
         }
 
-        let mut stack = vec![StackFrame {
-            group_idx: 0,
-            line_idx: None,
-        }];
-        let mut tokens = vec![Token::Group { len: 0 }];
-
+        let mut stack = Vec::<Option<Atom>>::new();
+        let mut curr_frame = None;
+        let mut str = module;
         loop {
             str = skip_white_space(str);
             let (Some(char), rem) = split_first_char(str) else {
-                pop_frame::<true>(&mut stack, &mut tokens)?;
-                return Ok(Self { tokens });
+                if !stack.is_empty() {
+                    break Err(ParseError::UnclosedParen);
+                }
+                break Ok(curr_frame.unwrap_or(Atom::Unit));
             };
             match char {
-                '.' => {
-                    str = skip_white_space(rem);
-                    let Some(c) = split_first_char(str).0 else {
-                        return Err(ParseError::TrailingDot);
-                    };
-                    let Some((ident, rem)) = parse_ident(str) else {
-                        return Err(ParseError::InvalidCharAfterDot(c));
-                    };
-                    tokens.push(Token::Field(ident));
+                '(' => {
+                    stack.push(curr_frame);
+                    curr_frame = Default::default();
+
                     str = rem;
                 }
-                ';' => {
-                    end_line(&mut stack, &mut tokens);
-                    stack.last_mut().unwrap().line_idx = NonZero::new(tokens.len());
-                    tokens.push(Token::Line { len: 0 });
+                ')' => {
+                    let Some(prev_frame) = stack.pop() else {
+                        break Err(ParseError::UnopenedParen);
+                    };
+                    let atom = std::mem::replace(&mut curr_frame, prev_frame).unwrap_or(Atom::Unit);
+                    push_atom(&mut curr_frame, atom);
+
                     str = rem;
                 }
                 '\"' => {
                     let (string, rem) = parse_string(rem)?;
-                    tokens.push(Token::String(string.into()));
-                    str = rem;
-                }
-                '(' => {
-                    stack.push(StackFrame {
-                        group_idx: tokens.len(),
-                        line_idx: NonZero::new(tokens.len() + 1),
-                    });
-                    tokens.push(Token::Group { len: 0 });
-                    tokens.push(Token::Line { len: 0 });
-                    str = rem;
-                }
-                ')' => {
-                    pop_frame::<false>(&mut stack, &mut tokens)?;
+
+                    push_atom(&mut curr_frame, Atom::String(string.into()));
+
                     str = rem;
                 }
                 c => {
                     let Some((ident, rem)) = parse_ident(str) else {
-                        return Err(ParseError::InvalidChar(c));
+                        break Err(ParseError::InvalidChar(c));
                     };
-                    tokens.push(Token::Identifier(ident));
+
+                    push_atom(&mut curr_frame, Atom::Identifier(ident));
+
                     str = rem;
                 }
             }
