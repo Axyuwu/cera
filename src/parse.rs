@@ -8,9 +8,9 @@ pub enum Atom {
 
 /// Left-associative
 #[derive(Debug)]
-struct Apply {
-    lhs: Atom,
-    rhs: Atom,
+pub struct Apply {
+    pub lhs: Atom,
+    pub rhs: Atom,
 }
 
 #[derive(Debug)]
@@ -153,6 +153,9 @@ fn parse_escape(str: &str) -> ParseResult<(Option<char>, &str)> {
         '\"' => Ok((Some('\"'), rem)),
         '\\' => Ok((Some('\\'), rem)),
         '\r' | '\n' => Ok((None, skip_white_space(rem))),
+        'n' => Ok((Some('\n'), rem)),
+        'r' => Ok((Some('\r'), rem)),
+        't' => Ok((Some('\t'), rem)),
         c => Err(ParseError::InvalidEscape(c)),
     }
 }

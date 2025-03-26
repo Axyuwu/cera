@@ -2,6 +2,7 @@ mod builtins;
 mod parse;
 
 fn main() {
-    let str = r#"helo (hai hello world wow (test test2 hai hello) ("hellow; \"world\""))"#;
-    dbg!(parse::Atom::parse_module(str).unwrap());
+    let input = std::fs::read_to_string("./examples/hello_world_interpreted.cera").unwrap();
+    let module = parse::Atom::parse_module(&input).unwrap();
+    dbg!(builtins::eval(&module).unwrap());
 }
