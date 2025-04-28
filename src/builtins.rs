@@ -1,137 +1,104 @@
-use std::any::Any;
+use std::sync::Arc;
 
 use crate::parse::{Apply, Atom};
 
-#[derive(Debug)]
-pub enum EvalError {
-    UnknownIdent(Box<str>),
-    CannotApplyStr,
-    CannotApplyUnit,
-    InvalidArg { arg: EvalValue, apply: EvalValue },
+#[derive(Debug, Clone)]
+pub enum EvalSlice<'t, T> {
+    Arc(Arc<[T]>),
+    Borrowed(&'t [T]),
 }
 
-type EvalResult = Result<EvalValue, EvalError>;
-
-type EvalValue = Box<dyn Value>;
-
-pub fn eval(atom: &Atom) -> EvalResult {
-    eval_ctx(
-        atom,
-        Context {
-            curr_lookup: &|ident| match ident {
-                "builtin" => Some(Box::new(Builtin)),
-                _ => None,
-            },
-            prev: None,
-        },
-    )
+impl<'t, T> std::ops::Deref for EvalSlice<'t, T> {
+    type Target = [T];
+    fn deref(&self) -> &[T] {
+        match self {
+            EvalSlice::Arc(items) => items.as_ref(),
+            EvalSlice::Borrowed(items) => items.as_ref(),
+        }
+    }
 }
 
-pub fn eval_ctx(atom: &Atom, ctx: Context) -> EvalResult {
-    Ok(match atom {
-        Atom::Unit => Box::new(Unit),
+impl<'t, T> EvalSlice<'t, T> {
+    fn get_mut(&mut self) -> Option<&mut [T]> {
+        match self {
+            EvalSlice::Arc(items) => Arc::get_mut(items),
+            _ => None,
+        }
+    }
+    fn make_mut(&mut self) -> &mut [T]
+    where
+        T: Clone,
+    {
+        match self {
+            EvalSlice::Arc(items) => Arc::make_mut(items),
+            EvalSlice::Borrowed(items) => {
+                *self = Self::Arc((*items).into());
+                self.make_mut()
+            }
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+pub enum EvalValue<'t> {
+    Bytes(EvalSlice<'t, u8>),
+    Aggregate(EvalSlice<'t, EvalValue<'t>>),
+}
+
+impl<'t> EvalValue<'t> {
+    const fn slice_const(slice: &'t [Self]) -> Self {
+        Self::Aggregate(EvalSlice::Borrowed(slice))
+    }
+    fn slice(slice: &'t (impl AsRef<[Self]> + 't + ?Sized)) -> Self {
+        Self::slice_const(slice.as_ref())
+    }
+    fn slice_cloned(slice: impl AsRef<[Self]>) -> Self {
+        Self::Aggregate(EvalSlice::Arc(slice.as_ref().into()))
+    }
+    fn arc(arc: Arc<[Self]>) -> Self {
+        Self::Aggregate(EvalSlice::Arc(arc))
+    }
+    const fn byte_slice_const(slice: &'t [u8]) -> Self {
+        Self::Bytes(EvalSlice::Borrowed(slice))
+    }
+    fn byte_slice(slice: &'t (impl AsRef<[u8]> + 't + ?Sized)) -> Self {
+        Self::byte_slice_const(slice.as_ref())
+    }
+    fn byte_slice_cloned(slice: impl AsRef<[u8]>) -> Self {
+        Self::Bytes(EvalSlice::Arc(slice.as_ref().into()))
+    }
+    fn byte_arc(arc: Arc<[u8]>) -> Self {
+        Self::Bytes(EvalSlice::Arc(arc))
+    }
+}
+
+// TODO: bytecode builtin
+pub const BUILTIN: EvalValue = EvalValue::slice_const(&[]);
+
+pub fn eval_builtin<'t>(atom: &'t Atom) -> EvalValue<'t> {
+    apply(BUILTIN, atom)
+}
+
+fn atom_to_val<'t>(atom: &'t Atom) -> EvalValue<'t> {
+    match atom {
+        Atom::Unit => EvalValue::slice(const { &[EvalValue::byte_slice_const(b"unit")] }),
         Atom::Apply(apply) => {
-            let Apply { ref lhs, ref rhs } = **apply;
-            eval_ctx(lhs, ctx)?.apply(rhs, ctx)?
+            let Apply { lhs, rhs } = &**apply;
+            let (e0, [e1, e2]) = (EvalValue::byte_slice(b"apply"), [lhs, rhs].map(atom_to_val));
+            EvalValue::slice_cloned([e0, e1, e2])
         }
-        Atom::Identifier(s) => ctx.resolve_ident(s)?,
-        Atom::String(s) => Box::new(s.clone()),
-    })
-}
-
-#[derive(Clone, Copy)]
-pub struct Context<'t> {
-    curr_lookup: &'t dyn Fn(&str) -> Option<EvalValue>,
-    prev: Option<&'t Context<'t>>,
-}
-
-impl<'t> Context<'t> {
-    fn resolve_ident(self, ident: &str) -> EvalResult {
-        if let Some(v) = (self.curr_lookup)(ident) {
-            return Ok(v);
-        }
-        if let Some(prev) = self.prev {
-            return prev.resolve_ident(ident);
-        }
-        Err(EvalError::UnknownIdent(ident.into()))
+        Atom::Identifier(s) => EvalValue::slice_cloned([
+            EvalValue::byte_slice("identifier"),
+            EvalValue::byte_slice(s.as_bytes()),
+        ]),
+        Atom::String(s) => EvalValue::slice_cloned([
+            EvalValue::byte_slice("string"),
+            EvalValue::byte_slice(s.as_bytes()),
+        ]),
     }
 }
 
-pub trait Value: Any + std::fmt::Debug {
-    fn apply(&self, atom: &Atom, ctx: Context) -> EvalResult;
-}
-
-impl dyn Value {
-    fn downcast<T: Value>(&self) -> Option<&T> {
-        if self.type_id() == std::any::TypeId::of::<T>() {
-            // Safety: same as the normal Any implementation
-            Some(unsafe { &*(self as *const dyn Value as *const T) })
-        } else {
-            None
-        }
-    }
-}
-
-impl Value for Box<str> {
-    fn apply(&self, _atom: &Atom, _ctx: Context) -> EvalResult {
-        Err(EvalError::CannotApplyStr)
-    }
-}
-
-#[derive(Debug)]
-struct Unit;
-impl Value for Unit {
-    fn apply(&self, _atom: &Atom, _ctx: Context) -> EvalResult {
-        Err(EvalError::CannotApplyUnit)
-    }
-}
-
-#[derive(Debug)]
-struct Builtin;
-impl Value for Builtin {
-    fn apply(&self, atom: &Atom, ctx: Context) -> EvalResult {
-        eval_ctx(
-            atom,
-            Context {
-                curr_lookup: &|ident| match ident {
-                    "interp" => Some(Box::new(Interpreter)),
-                    _ => None,
-                },
-                prev: Some(&ctx),
-            },
-        )
-    }
-}
-
-#[derive(Debug)]
-struct Interpreter;
-impl Value for Interpreter {
-    fn apply(&self, atom: &Atom, ctx: Context) -> EvalResult {
-        eval_ctx(
-            atom,
-            Context {
-                curr_lookup: &|ident| match ident {
-                    "print" => Some(Box::new(Print)),
-                    _ => None,
-                },
-                prev: Some(&ctx),
-            },
-        )
-    }
-}
-
-#[derive(Debug)]
-struct Print;
-impl Value for Print {
-    fn apply(&self, atom: &Atom, ctx: Context) -> EvalResult {
-        let arg = eval_ctx(atom, ctx)?;
-        let Some(str) = arg.downcast::<Box<str>>() else {
-            return Err(EvalError::InvalidArg {
-                arg,
-                apply: Box::new(Print),
-            });
-        };
-        print!("{}", str);
-        Ok(Box::new(Unit))
-    }
+fn apply<'t>(val: EvalValue<'t>, atom: &'t Atom) -> EvalValue<'t> {
+    // TODO: actual functions with bytecode etc
+    EvalValue::slice_cloned([val, atom_to_val(atom)])
 }

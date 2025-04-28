@@ -1,1 +1,4 @@
-(builtin interp print "Hello world!\n")
+builtin interpreted
+(print "Hello world!\n")
+(print "This is quite kewl\n")
+
