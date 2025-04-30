@@ -155,7 +155,7 @@ impl Value {
                         if matches!(b, 0x20..0x7F) {
                             f.write_str("\x01\x1B[0;32m\x02")?;
                         } else {
-                            f.write_str("\x01\x1B[0;33m\x02")?;
+                            f.write_str("\x01\x1B[0;30m\x02")?;
                         }
                         write_byte(*b, f)
                     })?;
@@ -169,7 +169,7 @@ impl Value {
                             f.write_str("\x01\x1B[0;32m\x02")?;
                             f.write_char(*b as char)
                         } else {
-                            f.write_str("\x01\x1B[0;33m\x02")?;
+                            f.write_str("\x01\x1B[0;30m\x02")?;
                             f.write_char('.')
                         }
                     })?;
