@@ -135,29 +135,47 @@ impl Value {
             bytes.chunks(width).enumerate().try_for_each(|(idx, line)| {
                 f.write_str(prefix)?;
 
-                (0..width)
-                    .map(|i| line.get(i).unwrap_or(&0x20))
-                    .try_for_each(|c| {
-                        if matches!(c, 0x20..0x7F) {
-                            f.write_char(*c as char)
-                        } else {
-                            f.write_char('.')
-                        }
-                    })?;
-                f.write_str("    ")?;
-
                 (idx * width)
                     .to_be_bytes()
                     .last_chunk::<4>()
                     .unwrap()
                     .iter()
                     .try_for_each(|b| write_byte(*b, f))?;
+                f.write_char(':')?;
 
-                line.iter().try_for_each(|b| {
-                    f.write_char(' ')?;
-                    write_byte(*b, f)
-                })?;
-                f.write_char('\n')
+                (0..width)
+                    .map(|i| (i, line.get(i)))
+                    .try_for_each(|(i, b)| {
+                        if i % 2 == 0 {
+                            f.write_char(' ')?;
+                        }
+                        let Some(b) = b else {
+                            return f.write_str("  ");
+                        };
+                        if matches!(b, 0x20..0x7F) {
+                            f.write_str("\x01\x1B[0;32m\x02")?;
+                        } else {
+                            f.write_str("\x01\x1B[0;33m\x02")?;
+                        }
+                        write_byte(*b, f)
+                    })?;
+
+                f.write_str("  ")?;
+
+                (0..width)
+                    .map(|i| line.get(i).unwrap_or(&0x20))
+                    .try_for_each(|b| {
+                        if matches!(b, 0x20..0x7F) {
+                            f.write_str("\x01\x1B[0;32m\x02")?;
+                            f.write_char(*b as char)
+                        } else {
+                            f.write_str("\x01\x1B[0;33m\x02")?;
+                            f.write_char('.')
+                        }
+                    })?;
+
+                f.write_char('\n')?;
+                f.write_str("\x01\x1B[0m\x02")
             })
         }
         match self {
