@@ -350,8 +350,8 @@ impl BuiltinFunc {
     fn from_value(value: Value) -> Self {
         let Value::Bytes(b) = &value else {
             panic!(
-                "tried making builtin func from value without the value being a byte string\n\
-                value:\n{}",
+                "tried making builtin func from value without the value being a byte string\
+                \n  value:\n{}",
                 value
             );
         };
