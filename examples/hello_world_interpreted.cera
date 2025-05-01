@@ -1,4 +1,2 @@
-builtin interpreted
-(print "Hello world!\n")
-(print "This is quite kewl\n")
+"builtin_eval" ("identity" "hai")
 

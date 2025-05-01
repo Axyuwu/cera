@@ -1,4 +1,5 @@
 use std::fmt::Write;
+use std::ops::ControlFlow;
 use std::sync::Arc;
 use std::{fmt::Display, hash::Hash};
 
@@ -208,11 +209,12 @@ impl Display for Value {
     }
 }
 
-// TODO: bytecode builtin
-pub const BUILTIN: Value = Value::slice_const(&[]);
+// TODO: make builtin transform allow for a minimal representation that can emit values which can
+// be evaluated using eval, such that the user may create the remaining of the compiler
+pub const BUILTIN: Value = Value::byte_slice_const(b"identity");
 
 pub fn eval_builtin(atom: Atom) -> Value {
-    eval(BUILTIN, atom_to_val(atom))
+    eval(Value::slice_move([BUILTIN, atom_to_val(atom)]))
 }
 
 fn atom_to_val(atom: Atom) -> Value {
@@ -234,9 +236,129 @@ fn atom_to_val(atom: Atom) -> Value {
     }
 }
 
-// expression: ((builtin_func_ident | expression) expression) | builtin_value_ident | value
-// *ident: ("ident" <name>)
-// value: ("value" <value>)
-fn eval(expression: Value, input: Value) -> Value {
-    Value::slice_move([expression, input])
+// expression: (func_ident value)
+fn eval(expression: Value) -> Value {
+    let mut thunk = BuiltinThunk::new(expression);
+    loop {
+        match thunk.call() {
+            ControlFlow::Continue(t) => thunk = t,
+            ControlFlow::Break(b) => break b,
+        }
+    }
+}
+
+// (("value" "value") "value") "hai"
+// -> (Final ((("value" "value") "value") "hai"))
+// -> FuncCall0(Final((("value" "value") "value") "hai"))
+struct BuiltinThunk {
+    state: BuiltinThunkState,
+    value: Value,
+}
+
+impl BuiltinThunk {
+    fn new(expression: Value) -> Self {
+        Self {
+            state: BuiltinThunkState {
+                callback: None,
+                func: BuiltinFunc::BuiltinEval,
+            },
+            value: expression,
+        }
+    }
+    fn call(self) -> ControlFlow<Value, Self> {
+        let Self { state, value } = self;
+        use ControlFlow::*;
+        use FuncThunk::*;
+        let BuiltinThunkState { callback, func } = state;
+        match (func.poll(value), callback) {
+            (
+                Pending {
+                    pending_func,
+                    new_func,
+                    value,
+                },
+                callback,
+            ) => Continue(Self {
+                state: BuiltinThunkState {
+                    callback: Some(Box::new(BuiltinThunkState {
+                        callback,
+                        func: pending_func,
+                    })),
+                    func: new_func,
+                },
+                value,
+            }),
+            (Step { func, value }, callback) => Continue(Self {
+                state: BuiltinThunkState { callback, func },
+                value,
+            }),
+            (Done { value }, Some(callback)) => Continue(Self {
+                state: *callback,
+                value,
+            }),
+            (Done { value }, None) => Break(value),
+        }
+    }
+}
+
+struct BuiltinThunkState {
+    callback: Option<Box<BuiltinThunkState>>,
+    func: BuiltinFunc,
+}
+
+enum FuncThunk {
+    Pending {
+        pending_func: BuiltinFunc,
+        new_func: BuiltinFunc,
+        value: Value,
+    },
+    Step {
+        func: BuiltinFunc,
+        value: Value,
+    },
+    Done {
+        value: Value,
+    },
+}
+
+enum BuiltinFunc {
+    Identity,
+    BuiltinEval,
+}
+
+impl BuiltinFunc {
+    fn poll(self, value: Value) -> FuncThunk {
+        use BuiltinFunc::*;
+        use FuncThunk::*;
+        match self {
+            Identity => Done { value },
+            BuiltinEval => {
+                let Value::Aggregate(slice) = &value else {
+                    panic!(
+                        "tried calling builtin_eval on non-function\n  value:\n{}",
+                        value
+                    );
+                };
+
+                Step {
+                    func: BuiltinFunc::from_value(slice[0].clone()),
+                    value: slice[1].clone(),
+                }
+            }
+        }
+    }
+    fn from_value(value: Value) -> Self {
+        let Value::Bytes(b) = &value else {
+            panic!("tried making builtin func from value without the value being a byte string\n  value:\n{}", value);
+        };
+        match &**b {
+            b"identity" => Self::Identity,
+            b"builtin_eval" => Self::BuiltinEval,
+            _ => panic!(
+                "tried making builtin func from value without that value being a valid byte string\
+                \n  value:\n{}",
+                value
+            ),
+        }
+    }
 }
