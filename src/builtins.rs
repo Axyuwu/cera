@@ -3,6 +3,8 @@ use std::ops::ControlFlow;
 use std::sync::Arc;
 use std::{fmt::Display, hash::Hash};
 
+use anyhow::{anyhow, bail, Context, Result};
+
 use crate::parse::{Apply, Atom};
 
 #[derive(Debug, Clone)]
@@ -85,6 +87,12 @@ impl Value {
     fn arc(arc: Arc<[Self]>) -> Self {
         Self::Aggregate(EvalSlice::Arc(arc))
     }
+    fn as_aggregate(self) -> Result<EvalSlice<Value>> {
+        let Self::Aggregate(s) = self else {
+            bail!("expected aggregate, found bytes:\n{}", self)
+        };
+        Ok(s)
+    }
     const fn byte_slice_const(slice: &'static [u8]) -> Self {
         Self::Bytes(EvalSlice::Borrowed(slice))
     }
@@ -99,6 +107,12 @@ impl Value {
     }
     fn byte_arc(arc: Arc<[u8]>) -> Self {
         Self::Bytes(EvalSlice::Arc(arc))
+    }
+    fn as_bytes(self) -> Result<EvalSlice<u8>> {
+        let Self::Bytes(s) = self else {
+            bail!("expected bytes, found aggregate:\n{}", self)
+        };
+        Ok(s)
     }
     fn prefix_fmt(&self, f: &mut std::fmt::Formatter<'_>, prefix: &mut String) -> std::fmt::Result {
         fn write_hexdump_width(
@@ -211,10 +225,11 @@ impl Display for Value {
 
 // TODO: make builtin transform allow for a minimal representation that can emit values which can
 // be evaluated using eval, such that the user may create the remaining of the compiler
-pub const BUILTIN: Value = Value::byte_slice_const(b"identity");
+pub const BUILTIN_EVAL_FUNC: Value = Value::slice_const(const { &[] });
 
-pub fn eval_builtin(atom: Atom) -> Value {
-    eval(Value::slice_move([BUILTIN, atom_to_val(atom)]))
+pub fn eval_builtin(atom: Atom) -> Result<Value> {
+    todo!();
+    eval(Value::slice_move([BUILTIN_EVAL_FUNC, atom_to_val(atom)]))
 }
 
 fn atom_to_val(atom: Atom) -> Value {
@@ -237,19 +252,16 @@ fn atom_to_val(atom: Atom) -> Value {
 }
 
 // expression: (func_ident value)
-fn eval(expression: Value) -> Value {
+fn eval(expression: Value) -> Result<Value> {
     let mut thunk = BuiltinThunk::new(expression);
     loop {
-        match thunk.call() {
+        match thunk.call()? {
             ControlFlow::Continue(t) => thunk = t,
-            ControlFlow::Break(b) => break b,
+            ControlFlow::Break(b) => break Ok(b),
         }
     }
 }
 
-// (("value" "value") "value") "hai"
-// -> (Final ((("value" "value") "value") "hai"))
-// -> FuncCall0(Final((("value" "value") "value") "hai"))
 struct BuiltinThunk {
     state: BuiltinThunkState,
     value: Value,
@@ -265,12 +277,12 @@ impl BuiltinThunk {
             value: expression,
         }
     }
-    fn call(self) -> ControlFlow<Value, Self> {
+    fn call(self) -> Result<ControlFlow<Value, Self>> {
         let Self { state, value } = self;
         use ControlFlow::*;
         use FuncThunk::*;
         let BuiltinThunkState { callback, func } = state;
-        match (func.poll(value), callback) {
+        Ok(match (func.poll(value)?, callback) {
             (
                 Pending {
                     pending_func,
@@ -297,7 +309,7 @@ impl BuiltinThunk {
                 value,
             }),
             (Done { value }, None) => Break(value),
-        }
+        })
     }
 }
 
@@ -322,47 +334,198 @@ enum FuncThunk {
 }
 
 enum BuiltinFunc {
-    Identity,
     BuiltinEval,
+    SetMove,
+    SetLen,
+    SetMkLen,
+    SetMap(SetMap),
+    SetNest,
+    Add,
 }
 
 impl BuiltinFunc {
-    fn poll(self, value: Value) -> FuncThunk {
-        use BuiltinFunc::*;
+    fn poll(self, value: Value) -> Result<FuncThunk> {
         use FuncThunk::*;
-        match self {
-            Identity => Done { value },
-            BuiltinEval => {
-                let Value::Aggregate(slice) = &value else {
-                    panic!(
-                        "tried calling builtin_eval on non-function\n  value:\n{}",
-                        value
-                    );
-                };
-
+        Ok(match self {
+            Self::BuiltinEval => {
+                let [ident, value] = get_args(value)?;
                 Step {
-                    func: BuiltinFunc::from_value(slice[0].clone()),
-                    value: slice[1].clone(),
+                    func: BuiltinFunc::from_value(&ident)?,
+                    value,
                 }
             }
-        }
+            BuiltinFunc::SetMove => {
+                let [set, args] = get_args(value)?;
+                let [src, dst] = {
+                    let [src, dst] = get_args(args)?.map(|e| get_usize(&e));
+                    [src?, dst?]
+                };
+                let mut set = set.as_aggregate()?;
+                let slice = set.make_mut();
+
+                let Some(src) = slice.get(src).map(Clone::clone) else {
+                    bail!(
+                        "src index {src} out of bound of value:\n{}",
+                        Value::slice_cloned(slice)
+                    )
+                };
+                let Some(dst) = slice.get_mut(dst) else {
+                    bail!(
+                        "dst index {dst} out of bound of value\n{}",
+                        Value::slice_cloned(slice)
+                    )
+                };
+                *dst = src;
+
+                Done {
+                    value: Value::Aggregate(set),
+                }
+            }
+            BuiltinFunc::SetLen => Done {
+                value: Value::byte_slice_move(value.as_aggregate()?.len().to_le_bytes()),
+            },
+            BuiltinFunc::SetMkLen => Done {
+                value: {
+                    let [set, len] = get_args(value)?;
+                    let set = set.as_aggregate()?;
+                    let len = get_usize(&len)?;
+                    if set.len() == len {
+                        Value::Aggregate(set)
+                    } else {
+                        Value::slice_move(
+                            (0..len)
+                                .map(|i| {
+                                    set.get(i)
+                                        .unwrap_or(&const { Value::slice_const(&[]) })
+                                        .clone()
+                                })
+                                .collect::<Box<_>>(),
+                        )
+                    }
+                },
+            },
+            BuiltinFunc::SetMap(SetMap::Init) => {
+                let [set, idx, func] = get_args(value)?;
+
+                let idx = get_usize(&idx)?;
+                let mut set = set.as_aggregate()?;
+                let slice = set.make_mut();
+
+                let Some(elem) = slice.get_mut(idx) else {
+                    bail!(
+                        "index {idx} out of bound of value\n{}",
+                        Value::slice_cloned(slice)
+                    )
+                };
+
+                Pending {
+                    value: std::mem::replace(elem, Value::slice_const(&[])),
+                    pending_func: Self::SetMap(SetMap::Pending { set, idx }),
+                    new_func: Self::from_value(&func)?,
+                }
+            }
+            BuiltinFunc::SetMap(SetMap::Pending { mut set, idx }) => {
+                let slice = set.make_mut();
+                let Some(elem) = slice.get_mut(idx) else {
+                    bail!(
+                        "index {idx} out of bound of value\n{}",
+                        Value::slice_cloned(slice)
+                    )
+                };
+                *elem = value;
+                Done {
+                    value: Value::Aggregate(set),
+                }
+            }
+            BuiltinFunc::SetNest => Done {
+                value: Value::slice_move([value]),
+            },
+            Self::Add => Done {
+                value: {
+                    let args = get_args(value)?;
+                    let args = {
+                        let [a1, a2] = args.each_ref().map(|e| get_bytes(&e));
+                        [a1?, a2?]
+                    };
+                    let mut acc = Vec::new();
+                    let mut idx = 0;
+                    let mut carry = false;
+                    while !args.into_iter().all(<[_]>::is_empty) {
+                        let [lhs, rhs] = args.map(|s| s.get(idx).cloned().unwrap_or_default());
+                        let (lhs, c1) = lhs.overflowing_add(rhs);
+                        let (lhs, c2) = lhs.overflowing_add(carry as u8);
+                        carry = c1 || c2 as bool;
+                        acc.push(lhs);
+                        idx += 1;
+                    }
+                    carry.then(|| acc.push(1));
+                    Value::byte_slice_move(acc)
+                },
+            },
+        })
     }
-    fn from_value(value: Value) -> Self {
-        let Value::Bytes(b) = &value else {
-            panic!(
-                "tried making builtin func from value without the value being a byte string\
-                \n  value:\n{}",
-                value
-            );
-        };
-        match &**b {
-            b"identity" => Self::Identity,
+    fn from_value(value: &Value) -> Result<Self> {
+        Ok(match get_bytes(value)? {
             b"builtin_eval" => Self::BuiltinEval,
-            _ => panic!(
-                "tried making builtin func from value without that value being a valid byte string\
-                \n  value:\n{}",
+            b"set_move" => Self::SetMove,
+            b"set_len" => Self::SetLen,
+            b"set_mklen" => Self::SetMkLen,
+            b"set_map" => Self::SetMap(SetMap::Init),
+            b"set_nest" => Self::SetNest,
+            b"add" => Self::Add,
+            _ => bail!(
+                "tried making builtin func from value without that value being valid bytes:\n{}",
                 value
             ),
-        }
+        })
     }
+}
+
+enum SetMap {
+    Init,
+    Pending { set: EvalSlice<Value>, idx: usize },
+}
+
+fn get_args<const SIZE: usize>(value: Value) -> Result<[Value; SIZE]> {
+    let Value::Aggregate(slice) = &value else {
+        bail!(
+            "expected aggregate value with {SIZE} elements, found bytes:\n{}",
+            value
+        );
+    };
+    TryInto::<&[Value; SIZE]>::try_into(&**slice)
+        .map(Clone::clone)
+        .with_context(|| {
+            format!(
+                "expected aggregate value with {SIZE} elements, found {}:\n{}",
+                slice.len(),
+                value
+            )
+        })
+}
+
+fn get_bytes(value: &Value) -> Result<&[u8]> {
+    let Value::Bytes(b) = value else {
+        bail!(
+            "expected value to be byte string, found aggregate:\n{}",
+            value
+        );
+    };
+    Ok(&**b)
+}
+
+fn get_usize(value: &Value) -> Result<usize> {
+    get_bytes(value)?
+        .iter()
+        .rev()
+        .try_fold(0usize, |acc, byte| {
+            acc.checked_mul(u8::MAX as usize)?
+                .checked_add(*byte as usize)
+        })
+        .ok_or_else(|| {
+            anyhow!(
+                "overflowed trying to get a usize from byte string:\n{}",
+                value
+            )
+        })
 }
