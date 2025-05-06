@@ -278,15 +278,36 @@ pub const BUILTIN_EVAL_FUNC: Value = Value::slice_const(
                         Value::slice_const(
                             const {
                                 &[
+                                    Value::byte_slice_const(b"add"),
+                                    Value::slice_const(
+                                        const {
+                                            &[
+                                                Value::byte_slice_const(&[1]),
+                                                Value::byte_slice_const(&[4]),
+                                            ]
+                                        },
+                                    ),
+                                ]
+                            },
+                        ),
+                        Value::slice_const(
+                            const {
+                                &[
                                     Value::byte_slice_const(b"identity"),
                                     Value::slice_const(
                                         const {
                                             &[
-                                                Value::byte_slice_const(&[0]),
-                                                Value::byte_slice_const(&[1]),
-                                                Value::byte_slice_const(&[2]),
-                                                Value::byte_slice_const(&[3]),
-                                                Value::byte_slice_const(&[4]),
+                                                Value::slice_const(
+                                                    const {
+                                                        &[
+                                                            Value::byte_slice_const(&[1]),
+                                                            Value::byte_slice_const(&[2]),
+                                                            Value::byte_slice_const(&[3]),
+                                                            Value::byte_slice_const(&[4]),
+                                                        ]
+                                                    },
+                                                ),
+                                                Value::byte_slice_const(&[5]),
                                             ]
                                         },
                                     ),
@@ -439,6 +460,7 @@ enum BuiltinFunc {
     Let(Let),
     LetArgEval(LetArgEval),
     Call,
+    If(If),
     Identity,
     AggrGet,
     AggrSet,
@@ -667,7 +689,6 @@ impl BuiltinFunc {
             Self::LetArgEval(LetArgEval::Final { state, func }) => Done {
                 value: Value::slice_move([state, Value::slice_move([func, value])]),
             },
-
             Self::LetArgEval(LetArgEval::Pending {
                 state,
                 mut current,
@@ -697,6 +718,25 @@ impl BuiltinFunc {
                 Step {
                     func: Self::Let(Let::Init { arg: Some(arg) }),
                     value: func,
+                }
+            }
+            Self::If(If::Init) => {
+                let [cond, ifthen, ifelse] = get_args(value)?;
+                Pending {
+                    pending_func: Self::If(If::Pending { ifthen, ifelse }),
+                    new_func: Self::BuiltinEval,
+                    value: cond,
+                }
+            }
+            Self::If(If::Pending { ifthen, ifelse }) => {
+                let res = get_bytes(&value)?;
+                Step {
+                    func: Self::BuiltinEval,
+                    value: match res {
+                        b"true" => ifthen,
+                        b"false" => ifelse,
+                        _ => bail!("non true/false value given to if:\n{value}"),
+                    },
                 }
             }
             Self::Identity => Done { value },
@@ -767,6 +807,7 @@ impl BuiltinFunc {
             b"builtin_eval" => Self::BuiltinEval,
             b"let" => Self::Let(Let::Init { arg: None }),
             b"call" => Self::Call,
+            b"if" => Self::If(If::Init),
             b"identity" => Self::Identity,
             b"aggr_get" => Self::AggrGet,
             b"aggr_set" => Self::AggrSet,
@@ -802,6 +843,11 @@ enum LetArgEval {
         current: EvalSlice<Value>,
         curr_idx: usize,
     },
+}
+
+enum If {
+    Init,
+    Pending { ifthen: Value, ifelse: Value },
 }
 
 fn get_args<const SIZE: usize>(value: Value) -> Result<[Value; SIZE]> {
