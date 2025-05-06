@@ -461,6 +461,7 @@ enum BuiltinFunc {
     LetArgEval(LetArgEval),
     Call,
     If(If),
+    Eq,
     Identity,
     AggrGet,
     AggrSet,
@@ -739,6 +740,15 @@ impl BuiltinFunc {
                     },
                 }
             }
+            Self::Eq => Done {
+                value: {
+                    let [lhs, rhs] = get_args(value)?;
+                    match *(lhs.as_bytes()?) == *(rhs.as_bytes()?) {
+                        true => Value::byte_slice_const(b"true"),
+                        false => Value::byte_slice_const(b"false"),
+                    }
+                },
+            },
             Self::Identity => Done { value },
             Self::AggrGet => Done {
                 value: {
