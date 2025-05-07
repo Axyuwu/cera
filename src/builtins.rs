@@ -1,54 +1,97 @@
+use std::convert::Infallible;
+use std::fmt::Display;
 use std::fmt::Write;
 use std::ops::ControlFlow;
 use std::sync::Arc;
-use std::{fmt::Display, hash::Hash};
 
 use anyhow::{anyhow, bail, ensure, Context, Result};
 
 use crate::parse::{Apply, Atom};
 
-#[derive(Debug, Clone)]
-pub enum EvalSlice<T: 'static> {
-    Arc(Arc<[T]>),
-    Borrowed(&'static [T]),
+pub trait SliceStorage<T>: Sized {
+    fn get(&self) -> &[T];
+    fn get_mut(&mut self) -> &mut [T];
+    fn try_new(slice: &[T]) -> Option<Self>;
 }
 
-impl<T> std::ops::Deref for EvalSlice<T> {
+#[derive(Debug, Clone)]
+pub struct U8SliceStorage {
+    len: u8,
+    storage: [u8; 22],
+}
+
+impl SliceStorage<u8> for U8SliceStorage {
+    fn get(&self) -> &[u8] {
+        &self.storage[..(self.len as usize)]
+    }
+
+    fn get_mut(&mut self) -> &mut [u8] {
+        &mut self.storage[..(self.len as usize)]
+    }
+
+    fn try_new(slice: &[u8]) -> Option<Self> {
+        if slice.len() > 22 {
+            None
+        } else {
+            let mut storage = [0; 22];
+            storage[0..(slice.len())].copy_from_slice(slice);
+            Some(Self {
+                len: slice.len() as u8,
+                storage,
+            })
+        }
+    }
+}
+impl<T> SliceStorage<T> for Infallible {
+    fn get(&self) -> &[T] {
+        unreachable!()
+    }
+
+    fn get_mut(&mut self) -> &mut [T] {
+        unreachable!()
+    }
+
+    fn try_new(_slice: &[T]) -> Option<Self> {
+        unreachable!()
+    }
+}
+
+pub trait HasSliceStorage: Sized {
+    type Storage: SliceStorage<Self>;
+}
+
+impl HasSliceStorage for Value {
+    type Storage = Infallible;
+}
+impl HasSliceStorage for u8 {
+    type Storage = U8SliceStorage;
+}
+
+#[repr(u8)]
+#[derive(Debug, Clone)]
+pub enum EvalSlice<T: 'static + HasSliceStorage> {
+    Arc(Arc<[T]>),
+    Borrowed(&'static [T]),
+    Inline(T::Storage),
+}
+
+impl<T: HasSliceStorage> std::ops::Deref for EvalSlice<T> {
     type Target = [T];
     fn deref(&self) -> &[T] {
         match self {
             EvalSlice::Arc(items) => items.as_ref(),
             EvalSlice::Borrowed(items) => items.as_ref(),
+            EvalSlice::Inline(items) => items.get(),
         }
     }
 }
-impl<T: PartialEq> PartialEq for EvalSlice<T> {
-    fn eq(&self, other: &Self) -> bool {
-        &**self == &**other
-    }
-}
-impl<T: Eq> Eq for EvalSlice<T> {}
-impl<T: Hash> Hash for EvalSlice<T> {
-    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
-        (&**self).hash(state)
-    }
-}
-impl<T: PartialOrd> PartialOrd for EvalSlice<T> {
-    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
-        (&**self).partial_cmp(&**other)
-    }
-}
-impl<T: Ord> Ord for EvalSlice<T> {
-    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
-        (&**self).cmp(&**other)
-    }
-}
 
-impl<T> EvalSlice<T> {
+impl<T: HasSliceStorage> EvalSlice<T> {
     fn get_mut(&mut self) -> Option<&mut [T]> {
         match self {
             EvalSlice::Arc(items) => Arc::get_mut(items),
-            _ => None,
+            EvalSlice::Borrowed(_) => None,
+            EvalSlice::Inline(items) => Some(items.get_mut()),
         }
     }
     fn make_mut(&mut self) -> &mut [T]
@@ -61,6 +104,7 @@ impl<T> EvalSlice<T> {
                 *self = Self::Arc((*items).into());
                 self.make_mut()
             }
+            EvalSlice::Inline(items) => items.get_mut(),
         }
     }
 }
@@ -109,13 +153,27 @@ impl Value {
         Self::Bytes(EvalSlice::Borrowed(slice))
     }
     fn bytes(slice: &'static (impl AsRef<[u8]> + ?Sized)) -> Self {
-        Self::bytes_const(slice.as_ref())
+        let bytes = slice.as_ref();
+        if let Some(slice) = U8SliceStorage::try_new(bytes) {
+            Self::Bytes(EvalSlice::Inline(slice))
+        } else {
+            Self::Bytes(EvalSlice::Borrowed(bytes))
+        }
     }
     fn bytes_cloned(slice: impl AsRef<[u8]>) -> Self {
-        Self::Bytes(EvalSlice::Arc(slice.as_ref().into()))
+        let bytes = slice.as_ref();
+        if let Some(slice) = U8SliceStorage::try_new(bytes) {
+            Self::Bytes(EvalSlice::Inline(slice))
+        } else {
+            Self::Bytes(EvalSlice::Arc(bytes.into()))
+        }
     }
-    fn bytes_move(slice: impl Into<Arc<[u8]>>) -> Self {
-        Self::Bytes(EvalSlice::Arc(slice.into()))
+    fn bytes_move(slice: impl Into<Arc<[u8]>> + AsRef<[u8]>) -> Self {
+        if let Some(slice) = U8SliceStorage::try_new(slice.as_ref()) {
+            Self::Bytes(EvalSlice::Inline(slice))
+        } else {
+            Self::Bytes(EvalSlice::Arc(slice.into()))
+        }
     }
     fn into_bytes(self) -> Result<EvalSlice<u8>> {
         let Self::Bytes(s) = self else {
@@ -734,7 +792,7 @@ impl BuiltinFunc {
             Self::Eq => Done {
                 value: {
                     let [lhs, rhs] = get_args(value)?;
-                    match *(lhs.as_bytes()?) == *(rhs.as_bytes()?) {
+                    match **(lhs.as_bytes()?) == **(rhs.as_bytes()?) {
                         true => Value::bytes_const(&[1]),
                         false => Value::bytes_const(&[0]),
                     }
@@ -885,9 +943,13 @@ impl Arithmetic {
             Self::Rem => todo!(),
             Self::Cmp => todo!(),
             Self::Not => {
-                let mut bytes = value.into_bytes()?;
-                bytes.make_mut().iter_mut().for_each(|b| *b = !*b);
-                Value::Bytes(bytes)
+                let mut bytes = value;
+                bytes
+                    .as_bytes_mut()?
+                    .make_mut()
+                    .iter_mut()
+                    .for_each(|b| *b = !*b);
+                bytes
             }
             Self::And => binary_bytewise(value, std::ops::BitAnd::bitand)
                 .context("in arithmetic function and")?,
