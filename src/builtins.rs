@@ -3,7 +3,7 @@ use std::ops::ControlFlow;
 use std::sync::Arc;
 use std::{fmt::Display, hash::Hash};
 
-use anyhow::{anyhow, bail, Context, Result};
+use anyhow::{anyhow, bail, ensure, Context, Result};
 
 use crate::parse::{Apply, Atom};
 
@@ -73,18 +73,18 @@ pub enum Value {
 
 impl Value {
     const fn unit() -> Self {
-        Self::slice_const(&[])
+        Self::aggregate_const(&[])
     }
-    const fn slice_const(slice: &'static [Self]) -> Self {
+    const fn aggregate_const(slice: &'static [Self]) -> Self {
         Self::Aggregate(EvalSlice::Borrowed(slice))
     }
-    fn slice(slice: &'static (impl AsRef<[Self]> + ?Sized)) -> Self {
-        Self::slice_const(slice.as_ref())
+    fn aggregate(slice: &'static (impl AsRef<[Self]> + ?Sized)) -> Self {
+        Self::aggregate_const(slice.as_ref())
     }
-    fn slice_cloned(slice: impl AsRef<[Self]>) -> Self {
+    fn aggregate_cloned(slice: impl AsRef<[Self]>) -> Self {
         Self::Aggregate(EvalSlice::Arc(slice.as_ref().into()))
     }
-    fn slice_move(slice: impl Into<Arc<[Self]>>) -> Self {
+    fn aggregate_move(slice: impl Into<Arc<[Self]>>) -> Self {
         Self::Aggregate(EvalSlice::Arc(slice.into()))
     }
     fn into_aggregate(self) -> Result<EvalSlice<Value>> {
@@ -105,16 +105,16 @@ impl Value {
         };
         Ok(s)
     }
-    const fn byte_slice_const(slice: &'static [u8]) -> Self {
+    const fn bytes_const(slice: &'static [u8]) -> Self {
         Self::Bytes(EvalSlice::Borrowed(slice))
     }
-    fn byte_slice(slice: &'static (impl AsRef<[u8]> + ?Sized)) -> Self {
-        Self::byte_slice_const(slice.as_ref())
+    fn bytes(slice: &'static (impl AsRef<[u8]> + ?Sized)) -> Self {
+        Self::bytes_const(slice.as_ref())
     }
-    fn byte_slice_cloned(slice: impl AsRef<[u8]>) -> Self {
+    fn bytes_cloned(slice: impl AsRef<[u8]>) -> Self {
         Self::Bytes(EvalSlice::Arc(slice.as_ref().into()))
     }
-    fn byte_slice_move(slice: impl Into<Arc<[u8]>>) -> Self {
+    fn bytes_move(slice: impl Into<Arc<[u8]>>) -> Self {
         Self::Bytes(EvalSlice::Arc(slice.into()))
     }
     fn into_bytes(self) -> Result<EvalSlice<u8>> {
@@ -246,68 +246,58 @@ impl Display for Value {
 
 // TODO: make builtin transform allow for a minimal representation that can emit values which can
 // be evaluated using eval, such that the user may create the remaining of the compiler
-pub const BUILTIN_EVAL_FUNC: Value = Value::slice_const(
+pub const BUILTIN_EVAL_FUNC: Value = Value::aggregate_const(
     const {
         &[
-            Value::slice_const(
+            Value::aggregate_const(
                 const {
                     &[
-                        Value::byte_slice_const(&[128, 4, 8]),
-                        Value::byte_slice_const(&[200, 2, 7]),
+                        Value::bytes_const(&[128, 4, 8]),
+                        Value::bytes_const(&[200, 2, 7]),
                     ]
                 },
             ),
-            Value::slice_const(
+            Value::aggregate_const(
                 const {
                     &[
-                        Value::slice_const(
+                        Value::aggregate_const(
                             const {
                                 &[
-                                    Value::byte_slice_const(b"add"),
-                                    Value::slice_const(
-                                        const {
-                                            &[
-                                                Value::byte_slice_const(&[1]),
-                                                Value::byte_slice_const(&[2]),
-                                            ]
-                                        },
+                                    Value::bytes_const(b"add"),
+                                    Value::aggregate_const(
+                                        const { &[Value::bytes_const(&[1]), Value::bytes_const(&[2])] },
                                     ),
                                 ]
                             },
                         ),
-                        Value::slice_const(
+                        Value::aggregate_const(
                             const {
                                 &[
-                                    Value::byte_slice_const(b"add"),
-                                    Value::slice_const(
-                                        const {
-                                            &[
-                                                Value::byte_slice_const(&[1]),
-                                                Value::byte_slice_const(&[4]),
-                                            ]
-                                        },
+                                    Value::bytes_const(b"add"),
+                                    Value::aggregate_const(
+                                        const { &[Value::bytes_const(&[1]), Value::bytes_const(&[4])] },
                                     ),
                                 ]
                             },
                         ),
-                        Value::slice_const(
+                        Value::aggregate_const(
                             const {
                                 &[
-                                    Value::byte_slice_const(b"identity"),
-                                    Value::slice_const(
+                                    Value::bytes_const(b"identity"),
+                                    Value::aggregate_const(
                                         const {
                                             &[
-                                                Value::slice_const(
+                                                Value::aggregate_const(
                                                     const {
                                                         &[
-                                                            Value::byte_slice_const(&[1]),
-                                                            Value::byte_slice_const(&[2]),
-                                                            Value::byte_slice_const(&[3]),
-                                                            Value::byte_slice_const(&[4]),
+                                                            Value::bytes_const(&[1]),
+                                                            Value::bytes_const(&[2]),
+                                                            Value::bytes_const(&[3]),
+                                                            Value::bytes_const(&[4]),
                                                         ]
                                                     },
                                                 ),
-                                                Value::byte_slice_const(&[5]),
+                                                Value::bytes_const(&[5]),
                                             ]
                                         },
                                     ),
@@ -322,27 +312,27 @@ pub const BUILTIN_EVAL_FUNC: Value = Value::slice_const(
 );
 
 pub fn eval_builtin(atom: Atom) -> Result<Value> {
-    eval(Value::slice_move([
-        Value::byte_slice("call"),
-        Value::slice_move([BUILTIN_EVAL_FUNC, atom_to_val(atom)]),
+    eval(Value::aggregate_move([
+        Value::bytes("call"),
+        Value::aggregate_move([BUILTIN_EVAL_FUNC, atom_to_val(atom)]),
     ]))
 }
 
 fn atom_to_val(atom: Atom) -> Value {
     match atom {
-        Atom::Unit => Value::slice(const { &[Value::byte_slice_const(b"unit")] }),
+        Atom::Unit => Value::aggregate(const { &[Value::bytes_const(b"unit")] }),
         Atom::Apply(apply) => {
             let Apply { lhs, rhs } = *apply;
-            let (e0, [e1, e2]) = (Value::byte_slice("apply"), [lhs, rhs].map(atom_to_val));
-            Value::slice_move([e0, e1, e2])
+            let (e0, [e1, e2]) = (Value::bytes("apply"), [lhs, rhs].map(atom_to_val));
+            Value::aggregate_move([e0, e1, e2])
         }
-        Atom::Identifier(s) => Value::slice_move([
-            Value::byte_slice("identifier"),
-            Value::byte_slice_move(s.into_boxed_bytes()),
+        Atom::Identifier(s) => Value::aggregate_move([
+            Value::bytes("identifier"),
+            Value::bytes_move(s.into_boxed_bytes()),
         ]),
-        Atom::String(s) => Value::slice_move([
-            Value::byte_slice("string"),
-            Value::byte_slice_move(s.into_boxed_bytes()),
+        Atom::String(s) => Value::aggregate_move([
+            Value::bytes("string"),
+            Value::bytes_move(s.into_boxed_bytes()),
         ]),
     }
 }
@@ -405,9 +395,11 @@ impl BuiltinThunk {
                     })),
                     depth: {
                         let depth = depth + 1;
-                        if depth > max_depth {
-                            bail!("max depth {max_depth} exceeded: {depth}");
-                        }
+                        ensure!(
+                            depth <= max_depth,
+                            "max depth {max_depth} exceeded: {depth}",
+                        );
+
                         depth
                     },
                     func: new_func,
@@ -486,15 +478,15 @@ impl BuiltinFunc {
                     let [a1, a2] = get_args(value.clone())?.map(|a| a.into_aggregate());
                     [a1?, a2?]
                 };
-                if expressions.is_empty() {
-                    bail!(
-                        "no expression in let binding:\n{}",
-                        Value::slice_move([
-                            Value::Aggregate(constants),
-                            Value::Aggregate(expressions)
-                        ])
-                    )
-                }
+                ensure!(
+                    !expressions.is_empty(),
+                    "no expression in let binding:\n{}",
+                    Value::aggregate_move([
+                        Value::Aggregate(constants),
+                        Value::Aggregate(expressions)
+                    ])
+                );
+
                 // (self, constant1, constant2, constant3, arg?, expression1, expression2, expression3)
                 // where each step, the leftmost expression gets evaluated and turned into a
                 // constant
@@ -544,11 +536,10 @@ impl BuiltinFunc {
                                         return Ok(());
                                     };
 
-                                    if liveness_idx > i {
-                                        bail!(
-                                            "index {real_idx} out of bound of bindings in function"
-                                        );
-                                    }
+                                    ensure!(
+                                        liveness_idx <= i,
+                                        "index {real_idx} out of bound of bindings in function"
+                                    );
 
                                     let liveness = &mut liveness[liveness_idx];
                                     if *liveness {
@@ -563,10 +554,10 @@ impl BuiltinFunc {
                             drops.sort();
                             drops.dedup();
 
-                            *elem = Value::slice_move([
+                            *elem = Value::aggregate_move([
                                 func,
                                 args,
-                                Value::slice_move(
+                                Value::aggregate_move(
                                     drops.into_iter().map(usize_to_val).collect::<Arc<_>>(),
                                 ),
                             ]);
@@ -579,7 +570,7 @@ impl BuiltinFunc {
                     pending_func: Self::Let(Let::PendingArgEval { idx }),
                     new_func: Self::LetArgEval(LetArgEval::Init {
                         state: {
-                            let tmp = Value::slice_move(state);
+                            let tmp = Value::aggregate_move(state);
                             tmp
                         },
                         idx,
@@ -621,7 +612,7 @@ impl BuiltinFunc {
                             let Some(out) = state.get_mut(get_usize(get_bytes(drop)?)?) else {
                                 bail!(
                                     "drop index {drop} out of bound of state:\n{}",
-                                    Value::slice_cloned(&state)
+                                    Value::aggregate_cloned(&state)
                                 )
                             };
                             *out = Value::unit();
@@ -675,7 +666,7 @@ impl BuiltinFunc {
                     Done { value: res.clone() }
                 }
                 Value::Aggregate(aggr) if aggr.is_empty() => Done {
-                    value: Value::slice(&[]),
+                    value: Value::aggregate(&[]),
                 },
                 Value::Aggregate(aggr) => Pending {
                     value: aggr.first().unwrap().clone(),
@@ -688,7 +679,7 @@ impl BuiltinFunc {
                 },
             },
             Self::LetArgEval(LetArgEval::Final { state, func }) => Done {
-                value: Value::slice_move([state, Value::slice_move([func, value])]),
+                value: Value::aggregate_move([state, Value::aggregate_move([func, value])]),
             },
             Self::LetArgEval(LetArgEval::Pending {
                 state,
@@ -744,8 +735,8 @@ impl BuiltinFunc {
                 value: {
                     let [lhs, rhs] = get_args(value)?;
                     match *(lhs.as_bytes()?) == *(rhs.as_bytes()?) {
-                        true => Value::byte_slice_const(&[1]),
-                        false => Value::byte_slice_const(&[0]),
+                        true => Value::bytes_const(&[1]),
+                        false => Value::bytes_const(&[0]),
                     }
                 },
             },
@@ -776,8 +767,8 @@ impl BuiltinFunc {
                 value: usize_to_val(value.into_aggregate()?.len()),
             },
             Self::AggrMake => Done {
-                value: Value::slice_move(
-                    std::iter::repeat(Value::slice_const(&[]))
+                value: Value::aggregate_move(
+                    std::iter::repeat(Value::aggregate_const(&[]))
                         .take(get_usize(get_bytes(&value)?)?)
                         .collect::<Box<_>>(),
                 ),
@@ -886,7 +877,7 @@ impl Arithmetic {
                 while let Some(&0) = acc.last() {
                     acc.pop();
                 }
-                Value::byte_slice_move(acc)
+                Value::bytes_move(acc)
             }
             Self::Sub => todo!(),
             Self::Mul => todo!(),
@@ -911,15 +902,14 @@ impl Arithmetic {
 fn binary_bytewise(value: Value, func: impl Fn(u8, u8) -> u8) -> Result<Value> {
     let [lhs, rhs] = get_args(value)?.map(Value::into_bytes);
     let (mut lhs, rhs) = (lhs?, rhs?);
-    if lhs.len() != rhs.len() {
-        bail!(
-            "non equal length bytes for binary bytewise op:\nrhs ({}): {}\n lhs ({}): {}",
-            lhs.len(),
-            Value::Bytes(lhs),
-            rhs.len(),
-            Value::Bytes(rhs),
-        )
-    }
+    ensure!(
+        lhs.len() == rhs.len(),
+        "non equal length bytes for binary bytewise op:\nrhs ({}): {}\n lhs ({}): {}",
+        lhs.len(),
+        Value::Bytes(lhs),
+        rhs.len(),
+        Value::Bytes(rhs),
+    );
 
     let (mut out, const_side) = if let Some(_) = lhs.get_mut() {
         (lhs, rhs)
@@ -963,7 +953,12 @@ fn get_usize(bytes: &[u8]) -> Result<usize> {
             acc.checked_mul(u8::MAX as usize)?
                 .checked_add(*byte as usize)
         })
-        .ok_or_else(|| anyhow!("overflowed trying to get a usize from bytes:\n{bytes:?}"))
+        .ok_or_else(|| {
+            anyhow!(
+                "overflowed trying to get a usize from bytes:\n{}",
+                Value::bytes_cloned(bytes)
+            )
+        })
 }
 
 fn usize_to_val(usize: usize) -> Value {
@@ -975,5 +970,5 @@ fn usize_to_val(usize: usize) -> Value {
         .find(|(_, v)| **v != 0)
         .map(|(i, _)| i + 1)
         .unwrap_or(0);
-    Value::byte_slice_cloned(&bytes[0..idx])
+    Value::bytes_cloned(&bytes[0..idx])
 }
