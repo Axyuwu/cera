@@ -467,7 +467,7 @@ enum BuiltinFunc {
     AggrSet,
     AggrLen,
     AggrMake,
-    Add,
+    Arithmetic(Arithmetic),
 }
 
 impl BuiltinFunc {
@@ -734,8 +734,8 @@ impl BuiltinFunc {
                 Step {
                     func: Self::BuiltinEval,
                     value: match res {
-                        b"true" => ifthen,
-                        b"false" => ifelse,
+                        &[1] => ifthen,
+                        &[0] => ifelse,
                         _ => bail!("non true/false value given to if:\n{value}"),
                     },
                 }
@@ -744,8 +744,8 @@ impl BuiltinFunc {
                 value: {
                     let [lhs, rhs] = get_args(value)?;
                     match *(lhs.as_bytes()?) == *(rhs.as_bytes()?) {
-                        true => Value::byte_slice_const(b"true"),
-                        false => Value::byte_slice_const(b"false"),
+                        true => Value::byte_slice_const(&[1]),
+                        false => Value::byte_slice_const(&[0]),
                     }
                 },
             },
@@ -782,33 +782,8 @@ impl BuiltinFunc {
                         .collect::<Box<_>>(),
                 ),
             },
-            Self::Add => Done {
-                value: {
-                    let args = get_args(value)?;
-                    let [lhs, rhs] = {
-                        let [a1, a2] = args.each_ref().map(|e| get_bytes(&e));
-                        [a1?, a2?]
-                    };
-                    let mut acc = Vec::new();
-                    let mut idx = 0;
-                    let mut carry = false;
-                    (0..)
-                        .map(|i| [lhs.get(i), rhs.get(i)])
-                        .take_while(|e| e.iter().any(Option::is_some))
-                        .map(|a| a.map(Option::<&_>::cloned).map(Option::unwrap_or_default))
-                        .for_each(|[lhs, rhs]| {
-                            let (lhs, c1) = lhs.overflowing_add(rhs);
-                            let (lhs, c2) = lhs.overflowing_add(carry as u8);
-                            carry = c1 || c2 as bool;
-                            acc.push(lhs);
-                            idx += 1;
-                        });
-                    carry.then(|| acc.push(1));
-                    while let Some(&0) = acc.last() {
-                        acc.pop();
-                    }
-                    Value::byte_slice_move(acc)
-                },
+            Self::Arithmetic(arithmetic) => Done {
+                value: arithmetic.poll(value)?,
             },
         })
     }
@@ -818,12 +793,22 @@ impl BuiltinFunc {
             b"let" => Self::Let(Let::Init { arg: None }),
             b"call" => Self::Call,
             b"if" => Self::If(If::Init),
+            b"eq" => Self::Eq,
             b"identity" => Self::Identity,
             b"aggr_get" => Self::AggrGet,
             b"aggr_set" => Self::AggrSet,
             b"aggr_len" => Self::AggrLen,
             b"aggr_make" => Self::AggrMake,
-            b"add" => Self::Add,
+            b"add" => Self::Arithmetic(Arithmetic::Add),
+            b"sub" => Self::Arithmetic(Arithmetic::Sub),
+            b"mul" => Self::Arithmetic(Arithmetic::Mul),
+            b"div" => Self::Arithmetic(Arithmetic::Div),
+            b"rem" => Self::Arithmetic(Arithmetic::Rem),
+            b"cmp" => Self::Arithmetic(Arithmetic::Cmp),
+            b"not" => Self::Arithmetic(Arithmetic::Not),
+            b"and" => Self::Arithmetic(Arithmetic::And),
+            b"or" => Self::Arithmetic(Arithmetic::Or),
+            b"xor" => Self::Arithmetic(Arithmetic::Xor),
             _ => bail!("invalid builtin function name:\n{value}"),
         })
     }
@@ -858,6 +843,94 @@ enum LetArgEval {
 enum If {
     Init,
     Pending { ifthen: Value, ifelse: Value },
+}
+
+#[derive(Clone, Copy, Debug)]
+enum Arithmetic {
+    Add,
+    Sub,
+    Mul,
+    Div,
+    Rem,
+    Cmp,
+    Not,
+    And,
+    Or,
+    Xor,
+}
+
+impl Arithmetic {
+    fn poll(self, value: Value) -> Result<Value> {
+        Ok(match self {
+            Self::Add => {
+                let args = get_args(value)?;
+                let [lhs, rhs] = {
+                    let [a1, a2] = args.each_ref().map(|e| get_bytes(&e));
+                    [a1?, a2?]
+                };
+                let mut acc = Vec::new();
+                let mut idx = 0;
+                let mut carry = false;
+                (0..)
+                    .map(|i| [lhs.get(i), rhs.get(i)])
+                    .take_while(|e| e.iter().any(Option::is_some))
+                    .map(|a| a.map(Option::<&_>::cloned).map(Option::unwrap_or_default))
+                    .for_each(|[lhs, rhs]| {
+                        let (lhs, c1) = lhs.overflowing_add(rhs);
+                        let (lhs, c2) = lhs.overflowing_add(carry as u8);
+                        carry = c1 || c2 as bool;
+                        acc.push(lhs);
+                        idx += 1;
+                    });
+                carry.then(|| acc.push(1));
+                while let Some(&0) = acc.last() {
+                    acc.pop();
+                }
+                Value::byte_slice_move(acc)
+            }
+            Self::Sub => todo!(),
+            Self::Mul => todo!(),
+            Self::Div => todo!(),
+            Self::Rem => todo!(),
+            Self::Cmp => todo!(),
+            Self::Not => {
+                let mut bytes = value.into_bytes()?;
+                bytes.make_mut().iter_mut().for_each(|b| *b = !*b);
+                Value::Bytes(bytes)
+            }
+            Self::And => binary_bytewise(value, std::ops::BitAnd::bitand)
+                .context("in arithmetic function and")?,
+            Self::Or => binary_bytewise(value, std::ops::BitOr::bitor)
+                .context("in arithmetic function or")?,
+            Self::Xor => binary_bytewise(value, std::ops::BitXor::bitxor)
+                .context("in arithmetic function xor")?,
+        })
+    }
+}
+
+fn binary_bytewise(value: Value, func: impl Fn(u8, u8) -> u8) -> Result<Value> {
+    let [lhs, rhs] = get_args(value)?.map(Value::into_bytes);
+    let (mut lhs, rhs) = (lhs?, rhs?);
+    if lhs.len() != rhs.len() {
+        bail!(
+            "non equal length bytes for binary bytewise op:\nrhs ({}): {}\n lhs ({}): {}",
+            lhs.len(),
+            Value::Bytes(lhs),
+            rhs.len(),
+            Value::Bytes(rhs),
+        )
+    }
+
+    let (mut out, const_side) = if let Some(_) = lhs.get_mut() {
+        (lhs, rhs)
+    } else {
+        (rhs, lhs)
+    };
+    out.make_mut()
+        .iter_mut()
+        .zip(&*const_side)
+        .for_each(|(lhs, rhs)| *lhs = func(*lhs, *rhs));
+    Ok(Value::Bytes(out))
 }
 
 fn get_args<const SIZE: usize>(value: Value) -> Result<[Value; SIZE]> {
