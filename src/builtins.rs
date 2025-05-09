@@ -1,3 +1,4 @@
+use std::cmp::Ordering;
 use std::convert::Infallible;
 use std::fmt::Display;
 use std::fmt::Write;
@@ -332,9 +333,9 @@ pub const BUILTIN_EVAL_FUNC: Value = Value::aggregate_const(
                         Value::aggregate_const(
                             const {
                                 &[
-                                    Value::bytes_const(b"shr"),
+                                    Value::bytes_const(b"cmp"),
                                     Value::aggregate_const(
-                                        const { &[Value::bytes_const(&[5]), Value::bytes_const(&[3])] },
+                                        const { &[Value::bytes_const(&[1]), Value::bytes_const(&[2])] },
                                     ),
                                 ]
                             },
@@ -921,7 +922,7 @@ impl Arithmetic {
             Self::Add => {
                 let args = get_args(value)?;
                 let [lhs, rhs] = {
-                    let [a1, a2] = args.each_ref().map(|e| get_bytes(&e));
+                    let [a1, a2] = args.each_ref().map(|e| get_bytes(e));
                     [a1?, a2?]
                 };
                 let mut acc = Vec::new();
@@ -939,13 +940,33 @@ impl Arithmetic {
                         idx += 1;
                     });
                 carry.then(|| acc.push(1));
-                Value::bytes_move(pop_zeros(acc))
+                Value::bytes_move(pop_zeroes(acc))
             }
             Self::Sub => todo!(),
             Self::Mul => todo!(),
             Self::Div => todo!(),
             Self::Rem => todo!(),
-            Self::Cmp => todo!(),
+            Self::Cmp => {
+                use Ordering::*;
+                fn ord_to_val(ord: Ordering) -> Value {
+                    const LESS: Value = Value::bytes_const(&[0]);
+                    const EQUAL: Value = Value::bytes_const(&[1]);
+                    const GREATER: Value = Value::bytes_const(&[2]);
+                    match ord {
+                        Less => LESS,
+                        Equal => EQUAL,
+                        Greater => GREATER,
+                    }
+                }
+
+                let [lhs, rhs] = get_args(value)?.map(Value::into_bytes);
+                let args = [lhs?, rhs?];
+                let [lhs, rhs] = args.each_ref().map(|e| trim_zeroes(e));
+                match lhs.len().cmp(&rhs.len()) {
+                    Equal => ord_to_val(lhs.iter().rev().cmp(rhs.iter().rev())),
+                    o => ord_to_val(o),
+                }
+            }
             Self::Shl => {
                 let [lhs, rhs] = get_args(value)?;
                 let offset = get_usize(get_bytes(&rhs)?)?;
@@ -969,7 +990,7 @@ impl Arithmetic {
                     acc.push(mask(window))
                 }
 
-                Value::bytes_move(pop_zeros(acc))
+                Value::bytes_move(pop_zeroes(acc))
             }
             Self::Shr => {
                 let [lhs, rhs] = get_args(value)?;
@@ -992,7 +1013,7 @@ impl Arithmetic {
                     acc.push(mask(window))
                 }
 
-                Value::bytes_move(pop_zeros(acc))
+                Value::bytes_move(pop_zeroes(acc))
             }
             Self::Not => {
                 let mut bytes = value;
@@ -1037,11 +1058,19 @@ fn binary_bytewise(value: Value, func: impl Fn(u8, u8) -> u8) -> Result<Value> {
     Ok(Value::Bytes(out))
 }
 
-fn pop_zeros(mut vec: Vec<u8>) -> Vec<u8> {
+fn pop_zeroes(mut vec: Vec<u8>) -> Vec<u8> {
     while let Some(&0) = vec.last() {
         vec.pop();
     }
     vec
+}
+
+fn trim_zeroes(mut slice: &[u8]) -> &[u8] {
+    while let Some(&0) = slice.last() {
+        let [head @ .., _] = slice else { break };
+        slice = head;
+    }
+    slice
 }
 
 fn get_args<const SIZE: usize>(value: Value) -> Result<[Value; SIZE]> {
