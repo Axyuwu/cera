@@ -312,6 +312,7 @@ pub const BUILTIN_EVAL_FUNC: Value = Value::aggregate_const(
                     &[
                         Value::bytes_const(&[128, 4, 8]),
                         Value::bytes_const(&[200, 2, 7]),
+                        Value::bytes_const(&[5]),
                     ]
                 },
             ),
@@ -331,9 +332,9 @@ pub const BUILTIN_EVAL_FUNC: Value = Value::aggregate_const(
                         Value::aggregate_const(
                             const {
                                 &[
-                                    Value::bytes_const(b"add"),
+                                    Value::bytes_const(b"shr"),
                                     Value::aggregate_const(
-                                        const { &[Value::bytes_const(&[1]), Value::bytes_const(&[4])] },
+                                        const { &[Value::bytes_const(&[5]), Value::bytes_const(&[3])] },
                                     ),
                                 ]
                             },
@@ -352,10 +353,11 @@ pub const BUILTIN_EVAL_FUNC: Value = Value::aggregate_const(
                                                             Value::bytes_const(&[2]),
                                                             Value::bytes_const(&[3]),
                                                             Value::bytes_const(&[4]),
+                                                            Value::bytes_const(&[5]),
                                                         ]
                                                     },
                                                 ),
-                                                Value::bytes_const(&[5]),
+                                                Value::bytes_const(&[6]),
                                             ]
                                         },
                                     ),
@@ -854,6 +856,8 @@ impl BuiltinFunc {
             b"div" => Self::Arithmetic(Arithmetic::Div),
             b"rem" => Self::Arithmetic(Arithmetic::Rem),
             b"cmp" => Self::Arithmetic(Arithmetic::Cmp),
+            b"shl" => Self::Arithmetic(Arithmetic::Shl),
+            b"shr" => Self::Arithmetic(Arithmetic::Shr),
             b"not" => Self::Arithmetic(Arithmetic::Not),
             b"and" => Self::Arithmetic(Arithmetic::And),
             b"or" => Self::Arithmetic(Arithmetic::Or),
@@ -894,6 +898,7 @@ enum If {
     Pending { ifthen: Value, ifelse: Value },
 }
 
+/// Operations are little-endian
 #[derive(Clone, Copy, Debug)]
 enum Arithmetic {
     Add,
@@ -902,6 +907,8 @@ enum Arithmetic {
     Div,
     Rem,
     Cmp,
+    Shl,
+    Shr,
     Not,
     And,
     Or,
@@ -932,16 +939,61 @@ impl Arithmetic {
                         idx += 1;
                     });
                 carry.then(|| acc.push(1));
-                while let Some(&0) = acc.last() {
-                    acc.pop();
-                }
-                Value::bytes_move(acc)
+                Value::bytes_move(pop_zeros(acc))
             }
             Self::Sub => todo!(),
             Self::Mul => todo!(),
             Self::Div => todo!(),
             Self::Rem => todo!(),
             Self::Cmp => todo!(),
+            Self::Shl => {
+                let [lhs, rhs] = get_args(value)?;
+                let offset = get_usize(get_bytes(&rhs)?)?;
+                let lhs = lhs.as_bytes()?;
+                let (bits, bytes) = (offset % 8, offset / 8);
+                let mut acc = vec![0; bytes];
+
+                let mask = |[small, big]: [u8; 2]| (small >> (8 - bits)) | (big << bits);
+                let mut idx: usize = 0;
+                let mut next_window = || {
+                    let res = [
+                        idx.checked_sub(1)
+                            .map(|i| lhs.get(i).copied())
+                            .unwrap_or(Some(0u8))?,
+                        lhs.get(idx).copied().unwrap_or_default(),
+                    ];
+                    idx += 1;
+                    Some(res)
+                };
+                while let Some(window) = next_window() {
+                    acc.push(mask(window))
+                }
+
+                Value::bytes_move(pop_zeros(acc))
+            }
+            Self::Shr => {
+                let [lhs, rhs] = get_args(value)?;
+                let offset = get_usize(get_bytes(&rhs)?)?;
+                let (bits, bytes) = (offset % 8, offset / 8);
+                let lhs = lhs.as_bytes()?.get(bytes..).unwrap_or(&[]);
+                let mut acc = Vec::new();
+
+                let mask = |[small, big]: [u8; 2]| (small >> bits) | (big << (8 - bits));
+                let mut idx = 0;
+                let mut next_window = || {
+                    let res = [
+                        *lhs.get(idx)?,
+                        lhs.get(idx + 1).copied().unwrap_or_default(),
+                    ];
+                    idx += 1;
+                    Some(res)
+                };
+                while let Some(window) = next_window() {
+                    acc.push(mask(window))
+                }
+
+                Value::bytes_move(pop_zeros(acc))
+            }
             Self::Not => {
                 let mut bytes = value;
                 bytes
@@ -983,6 +1035,13 @@ fn binary_bytewise(value: Value, func: impl Fn(u8, u8) -> u8) -> Result<Value> {
         .zip(&*const_side)
         .for_each(|(lhs, rhs)| *lhs = func(*lhs, *rhs));
     Ok(Value::Bytes(out))
+}
+
+fn pop_zeros(mut vec: Vec<u8>) -> Vec<u8> {
+    while let Some(&0) = vec.last() {
+        vec.pop();
+    }
+    vec
 }
 
 fn get_args<const SIZE: usize>(value: Value) -> Result<[Value; SIZE]> {
