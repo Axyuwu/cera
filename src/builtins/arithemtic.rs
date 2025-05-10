@@ -106,6 +106,7 @@ pub enum Arithmetic {
 }
 
 impl Arithmetic {
+    /// Operations may give results with trailing zeros, to limit allocations when possible
     pub fn poll(self, value: Value) -> Result<Value> {
         Ok(match self {
             Self::Add => {
@@ -157,29 +158,13 @@ impl Arithmetic {
                 }
             }
             Self::Shl => {
-                let [value, rhs] = get_args(value)?;
+                let [lhs, rhs] = get_args(value)?;
                 let offset = get_usize(rhs.as_bytes()?)?;
-
-                let lhs_no_trim = value.as_bytes()?;
-                let lhs = trim_zeroes(&lhs_no_trim);
-
-                if offset == 0 {
-                    return Ok(if lhs_no_trim.len() == lhs.len() {
-                        value
-                    } else {
-                        Value::bytes_cloned(lhs)
-                    });
-                }
+                let lhs = trim_zeroes(lhs.as_bytes()?);
 
                 let (bits, bytes) = (offset % 8, offset / 8);
 
-                let Some(leading_byte) = lhs.last() else {
-                    return Ok(Value::bytes(&[]));
-                };
-
-                let mut res = ByteStorage::new(
-                    bytes + lhs.len() + (leading_byte.leading_zeros() < bits as u32) as usize,
-                );
+                let mut res = ByteStorage::new(lhs.len() + bytes + 1);
 
                 let mask = |[small, big]: [u8; 2]| (small >> (8 - bits)) | (big << bits);
 
@@ -196,30 +181,13 @@ impl Arithmetic {
                 Value::bytes_move(res)
             }
             Self::Shr => {
-                let [value, rhs] = get_args(value)?;
+                let [lhs, rhs] = get_args(value)?;
                 let offset = get_usize(rhs.as_bytes()?)?;
-
-                let lhs_no_trim = value.as_bytes()?;
-                let lhs = trim_zeroes(&lhs_no_trim);
-
-                if offset == 0 {
-                    return Ok(if lhs_no_trim.len() == lhs.len() {
-                        value
-                    } else {
-                        Value::bytes_cloned(lhs)
-                    });
-                }
+                let lhs = trim_zeroes(lhs.as_bytes()?);
 
                 let (bits, bytes) = (offset % 8, offset / 8);
 
-                let (lhs, leading_byte) = match lhs.get(bytes..) {
-                    Some(lhs @ [.., byte]) => (lhs, byte),
-                    _ => return Ok(Value::bytes(&[])),
-                };
-
-                let mut res = ByteStorage::new(
-                    lhs.len() - (8 - leading_byte.leading_zeros() <= bits as u32) as usize,
-                );
+                let mut res = ByteStorage::new(lhs.len().saturating_sub(bytes));
 
                 let mask = |[small, big]: [u8; 2]| (small >> bits) | (big << (8 - bits));
 

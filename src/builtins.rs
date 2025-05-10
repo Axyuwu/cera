@@ -1,12 +1,10 @@
 mod arithemtic;
 
-use std::cmp::Ordering;
 use std::convert::Infallible;
 use std::fmt::Display;
 use std::fmt::Write;
 use std::ops::ControlFlow;
 use std::ops::Deref;
-use std::ops::DerefMut;
 use std::sync::Arc;
 
 use anyhow::{anyhow, bail, ensure, Context, Result};
