@@ -111,11 +111,10 @@ impl Arithmetic {
     pub fn poll(self, value: Value) -> Result<Value> {
         Ok(match self {
             Self::Add => {
-                let args = get_args(value)?;
-                let [lhs, rhs] = {
-                    let [a1, a2] = args.each_ref().map(|e| e.as_bytes().map(|s| trim_zeros(s)));
-                    [a1?, a2?]
-                };
+                let [lhs, rhs] = get_args(value)?.map(Value::into_bytes);
+                let args = [lhs?, rhs?];
+                let [lhs, rhs] = args.each_ref().map(|e| trim_zeros(e));
+
                 let mut res = ByteStorage::new(std::cmp::max(lhs.len(), rhs.len()) + 1);
                 res.iter_mut()
                     .enumerate()
@@ -130,11 +129,10 @@ impl Arithmetic {
                 Value::bytes_move(res)
             }
             Self::Sub => {
-                let args = get_args(value)?;
-                let [lhs, rhs] = {
-                    let [a1, a2] = args.each_ref().map(|e| e.as_bytes().map(|s| trim_zeros(s)));
-                    [a1?, a2?]
-                };
+                let [lhs, rhs] = get_args(value)?.map(Value::into_bytes);
+                let args = [lhs?, rhs?];
+                let [lhs, rhs] = args.each_ref().map(|e| trim_zeros(e));
+
                 let mut res = ByteStorage::new(lhs.len());
                 let carry = res
                     .iter_mut()
@@ -149,13 +147,57 @@ impl Arithmetic {
                     });
                 ensure!(
                     !carry,
-                    "sub underflowed, left argument was greater than right one"
+                    "sub underflowed, left argument was less than right one"
                 );
                 Value::bytes_move(res)
             }
-            Self::Mul => todo!(),
-            Self::Div => todo!(),
-            Self::Rem => todo!(),
+            Self::Mul => {
+                let [lhs, rhs] = get_args(value)?.map(Value::into_bytes);
+                let args = [lhs?, rhs?];
+                let [lhs, rhs] = args.each_ref().map(|e| trim_zeros(e));
+
+                let mut res = ByteStorage::new(lhs.len() + rhs.len());
+
+                lhs.iter().enumerate().for_each(|(i, lhs)| {
+                    rhs.iter().chain(std::iter::once(&0)).enumerate().fold(
+                        0u8,
+                        |carry, (j, rhs)| {
+                            let dst = &mut res[i + j];
+                            // Doesn't overflow, as with all max values:
+                            // 255 + 255 + (255 * 255) = 65535 (=u16::MAX)
+                            let [curr, carry] =
+                                (*dst as u16 + carry as u16 + (*lhs as u16 * *rhs as u16))
+                                    .to_le_bytes();
+                            *dst = curr;
+                            carry
+                        },
+                    );
+                });
+
+                Value::bytes_move(res)
+            }
+            Self::Div => {
+                let [lhs, rhs] = get_args(value)?.map(Value::into_bytes);
+                let args = [lhs?, rhs?];
+                let [lhs, rhs] = args.each_ref().map(|e| trim_zeros(e));
+
+                ensure!(rhs.len() != 0, "div by zero, right argument was zero");
+
+                let mut res = ByteStorage::new(lhs.len() - rhs.len() + 1);
+
+                todo!()
+            }
+            Self::Rem => {
+                let [lhs, rhs] = get_args(value)?.map(Value::into_bytes);
+                let args = [lhs?, rhs?];
+                let [lhs, rhs] = args.each_ref().map(|e| trim_zeros(e));
+
+                ensure!(rhs.len() != 0, "rem by zero, right argument was zero");
+
+                let mut res = ByteStorage::new(rhs.len());
+
+                todo!()
+            }
             Self::Cmp => {
                 use Ordering::*;
                 fn ord_to_val(ord: Ordering) -> Value {
