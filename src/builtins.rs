@@ -326,7 +326,7 @@ pub const BUILTIN_EVAL_FUNC: Value = Value::aggregate_const(
                         Value::aggregate_const(
                             const {
                                 &[
-                                    Value::bytes_const(b"add"),
+                                    Value::bytes_const(b"sub"),
                                     Value::aggregate_const(
                                         const { &[Value::bytes_const(&[1]), Value::bytes_const(&[2])] },
                                     ),

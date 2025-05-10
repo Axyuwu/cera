@@ -106,7 +106,8 @@ pub enum Arithmetic {
 }
 
 impl Arithmetic {
-    /// Operations may give results with trailing zeros, to limit allocations when possible
+    /// Operations may give results with trailing zeros, to limit allocations when possible, by
+    /// always allocating a computed upper bound of the size
     pub fn poll(self, value: Value) -> Result<Value> {
         Ok(match self {
             Self::Add => {
@@ -128,7 +129,30 @@ impl Arithmetic {
                     });
                 Value::bytes_move(res)
             }
-            Self::Sub => todo!(),
+            Self::Sub => {
+                let args = get_args(value)?;
+                let [lhs, rhs] = {
+                    let [a1, a2] = args.each_ref().map(|e| e.as_bytes().map(|s| trim_zeros(s)));
+                    [a1?, a2?]
+                };
+                let mut res = ByteStorage::new(lhs.len());
+                let carry = res
+                    .iter_mut()
+                    .enumerate()
+                    .fold(false, |carry, (idx, byte)| {
+                        let [lhs, rhs] =
+                            [lhs, rhs].map(|s| s.get(idx).copied().unwrap_or_default());
+                        let (r1, c1) = lhs.overflowing_sub(rhs);
+                        let (res, c2) = r1.overflowing_sub(carry as u8);
+                        *byte = res;
+                        c1 || c2
+                    });
+                ensure!(
+                    !carry,
+                    "sub underflowed, left argument was greater than right one"
+                );
+                Value::bytes_move(res)
+            }
             Self::Mul => todo!(),
             Self::Div => todo!(),
             Self::Rem => todo!(),
