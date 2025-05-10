@@ -112,25 +112,21 @@ impl Arithmetic {
             Self::Add => {
                 let args = get_args(value)?;
                 let [lhs, rhs] = {
-                    let [a1, a2] = args.each_ref().map(|e| e.as_bytes());
+                    let [a1, a2] = args.each_ref().map(|e| e.as_bytes().map(|s| trim_zeros(s)));
                     [a1?, a2?]
                 };
-                let mut acc = Vec::new();
-                let mut idx = 0;
-                let mut carry = false;
-                (0..)
-                    .map(|i| [lhs.get(i), rhs.get(i)])
-                    .take_while(|e| e.iter().any(Option::is_some))
-                    .map(|a| a.map(Option::<&_>::cloned).map(Option::unwrap_or_default))
-                    .for_each(|[lhs, rhs]| {
-                        let (lhs, c1) = lhs.overflowing_add(rhs);
-                        let (lhs, c2) = lhs.overflowing_add(carry as u8);
-                        carry = c1 || c2 as bool;
-                        acc.push(lhs);
-                        idx += 1;
+                let mut res = ByteStorage::new(std::cmp::max(lhs.len(), rhs.len()) + 1);
+                res.iter_mut()
+                    .enumerate()
+                    .fold(false, |carry, (idx, byte)| {
+                        let [lhs, rhs] =
+                            [lhs, rhs].map(|s| s.get(idx).copied().unwrap_or_default());
+                        let (r1, c1) = lhs.overflowing_add(rhs);
+                        let (res, c2) = r1.overflowing_add(carry as u8);
+                        *byte = res;
+                        c1 || c2
                     });
-                carry.then(|| acc.push(1));
-                Value::bytes_move(pop_zeroes(acc))
+                Value::bytes_move(res)
             }
             Self::Sub => todo!(),
             Self::Mul => todo!(),
@@ -151,7 +147,7 @@ impl Arithmetic {
 
                 let [lhs, rhs] = get_args(value)?.map(Value::into_bytes);
                 let args = [lhs?, rhs?];
-                let [lhs, rhs] = args.each_ref().map(|e| trim_zeroes(e));
+                let [lhs, rhs] = args.each_ref().map(|e| trim_zeros(e));
                 match lhs.len().cmp(&rhs.len()) {
                     Equal => ord_to_val(lhs.iter().rev().cmp(rhs.iter().rev())),
                     o => ord_to_val(o),
@@ -160,7 +156,7 @@ impl Arithmetic {
             Self::Shl => {
                 let [lhs, rhs] = get_args(value)?;
                 let offset = get_usize(rhs.as_bytes()?)?;
-                let lhs = trim_zeroes(lhs.as_bytes()?);
+                let lhs = trim_zeros(lhs.as_bytes()?);
 
                 let (bits, bytes) = (offset % 8, offset / 8);
 
@@ -183,7 +179,7 @@ impl Arithmetic {
             Self::Shr => {
                 let [lhs, rhs] = get_args(value)?;
                 let offset = get_usize(rhs.as_bytes()?)?;
-                let lhs = trim_zeroes(lhs.as_bytes()?);
+                let lhs = trim_zeros(lhs.as_bytes()?);
 
                 let (bits, bytes) = (offset % 8, offset / 8);
 
@@ -260,14 +256,14 @@ fn binary_bytewise(value: Value, func: impl Fn(u8, u8) -> u8) -> Result<Value> {
     Ok(Value::Bytes(out))
 }
 
-fn pop_zeroes(mut vec: Vec<u8>) -> Vec<u8> {
+fn pop_zeros(mut vec: Vec<u8>) -> Vec<u8> {
     while let Some(&0) = vec.last() {
         vec.pop();
     }
     vec
 }
 
-fn trim_zeroes(mut slice: &[u8]) -> &[u8] {
+fn trim_zeros(mut slice: &[u8]) -> &[u8] {
     while let [head @ .., 0] = slice {
         slice = head
     }
