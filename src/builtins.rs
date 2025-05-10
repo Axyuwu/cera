@@ -1,11 +1,16 @@
+mod arithemtic;
+
 use std::cmp::Ordering;
 use std::convert::Infallible;
 use std::fmt::Display;
 use std::fmt::Write;
 use std::ops::ControlFlow;
+use std::ops::Deref;
+use std::ops::DerefMut;
 use std::sync::Arc;
 
 use anyhow::{anyhow, bail, ensure, Context, Result};
+use arithemtic::Arithmetic;
 
 use crate::parse::{Apply, Atom};
 
@@ -76,7 +81,7 @@ pub enum EvalSlice<T: 'static + HasSliceStorage> {
     Inline(T::Storage),
 }
 
-impl<T: HasSliceStorage> std::ops::Deref for EvalSlice<T> {
+impl<T: HasSliceStorage> Deref for EvalSlice<T> {
     type Target = [T];
     fn deref(&self) -> &[T] {
         match self {
@@ -312,8 +317,8 @@ pub const BUILTIN_EVAL_FUNC: Value = Value::aggregate_const(
                 const {
                     &[
                         Value::bytes_const(&[128, 4, 8]),
-                        Value::bytes_const(&[200, 2, 7]),
-                        Value::bytes_const(&[5]),
+                        Value::bytes_const(&[231, 2, 7]),
+                        Value::bytes_const(&[4]),
                     ]
                 },
             ),
@@ -333,9 +338,9 @@ pub const BUILTIN_EVAL_FUNC: Value = Value::aggregate_const(
                         Value::aggregate_const(
                             const {
                                 &[
-                                    Value::bytes_const(b"cmp"),
+                                    Value::bytes_const(b"shr"),
                                     Value::aggregate_const(
-                                        const { &[Value::bytes_const(&[1]), Value::bytes_const(&[2])] },
+                                        const { &[Value::bytes_const(&[2]), Value::bytes_const(&[3])] },
                                     ),
                                 ]
                             },
@@ -384,8 +389,10 @@ fn atom_to_val(atom: Atom) -> Value {
         Atom::Unit => Value::aggregate(const { &[Value::bytes_const(b"unit")] }),
         Atom::Apply(apply) => {
             let Apply { lhs, rhs } = *apply;
-            let (e0, [e1, e2]) = (Value::bytes("apply"), [lhs, rhs].map(atom_to_val));
-            Value::aggregate_move([e0, e1, e2])
+            Value::aggregate_move([
+                Value::bytes("apply"),
+                Value::aggregate_move([lhs, rhs].map(atom_to_val)),
+            ])
         }
         Atom::Identifier(s) => Value::aggregate_move([
             Value::bytes("identifier"),
@@ -670,7 +677,7 @@ impl BuiltinFunc {
                         .as_aggregate()?
                         .iter()
                         .try_for_each(|drop| -> Result<_> {
-                            let Some(out) = state.get_mut(get_usize(get_bytes(drop)?)?) else {
+                            let Some(out) = state.get_mut(get_usize(drop.as_bytes()?)?) else {
                                 bail!(
                                     "drop index {drop} out of bound of state:\n{}",
                                     Value::aggregate_cloned(&state)
@@ -782,7 +789,7 @@ impl BuiltinFunc {
                 }
             }
             Self::If(If::Pending { ifthen, ifelse }) => {
-                let res = get_bytes(&value)?;
+                let res = &**value.as_bytes()?;
                 Step {
                     func: Self::BuiltinEval,
                     value: match res {
@@ -805,7 +812,7 @@ impl BuiltinFunc {
             Self::AggrGet => Done {
                 value: {
                     let [value, idx] = get_args(value)?;
-                    let idx = get_usize(get_bytes(&idx)?)?;
+                    let idx = get_usize(idx.as_bytes()?)?;
                     let aggr = value.as_aggregate()?;
                     aggr.get(idx)
                         .ok_or_else(|| anyhow!("index {idx} out of bounds of aggregate:\n{value}"))?
@@ -815,7 +822,7 @@ impl BuiltinFunc {
             Self::AggrSet => Done {
                 value: {
                     let [mut value, idx, src] = get_args(value)?;
-                    let idx = get_usize(get_bytes(&idx)?)?;
+                    let idx = get_usize(idx.as_bytes()?)?;
                     let aggr = value.as_aggregate_mut()?;
                     let Some(dst) = aggr.make_mut().get_mut(idx) else {
                         bail!("index {idx} out of bounds of aggregate:\n{value}")
@@ -830,7 +837,7 @@ impl BuiltinFunc {
             Self::AggrMake => Done {
                 value: Value::aggregate_move(
                     std::iter::repeat(Value::aggregate_const(&[]))
-                        .take(get_usize(get_bytes(&value)?)?)
+                        .take(get_usize(value.as_bytes()?)?)
                         .collect::<Box<_>>(),
                 ),
             },
@@ -840,7 +847,7 @@ impl BuiltinFunc {
         })
     }
     fn from_value(value: &Value) -> Result<Self> {
-        Ok(match get_bytes(value)? {
+        Ok(match &**value.as_bytes()? {
             b"builtin_eval" => Self::BuiltinEval,
             b"let" => Self::Let(Let::Init { arg: None }),
             b"call" => Self::Call,
@@ -851,19 +858,13 @@ impl BuiltinFunc {
             b"aggr_set" => Self::AggrSet,
             b"aggr_len" => Self::AggrLen,
             b"aggr_make" => Self::AggrMake,
-            b"add" => Self::Arithmetic(Arithmetic::Add),
-            b"sub" => Self::Arithmetic(Arithmetic::Sub),
-            b"mul" => Self::Arithmetic(Arithmetic::Mul),
-            b"div" => Self::Arithmetic(Arithmetic::Div),
-            b"rem" => Self::Arithmetic(Arithmetic::Rem),
-            b"cmp" => Self::Arithmetic(Arithmetic::Cmp),
-            b"shl" => Self::Arithmetic(Arithmetic::Shl),
-            b"shr" => Self::Arithmetic(Arithmetic::Shr),
-            b"not" => Self::Arithmetic(Arithmetic::Not),
-            b"and" => Self::Arithmetic(Arithmetic::And),
-            b"or" => Self::Arithmetic(Arithmetic::Or),
-            b"xor" => Self::Arithmetic(Arithmetic::Xor),
-            _ => bail!("invalid builtin function name:\n{value}"),
+            s => {
+                if let Some(a) = Arithmetic::from_ident(s) {
+                    Self::Arithmetic(a)
+                } else {
+                    bail!("invalid builtin function name:\n{value}")
+                }
+            }
         })
     }
 }
@@ -899,180 +900,6 @@ enum If {
     Pending { ifthen: Value, ifelse: Value },
 }
 
-/// Operations are little-endian
-#[derive(Clone, Copy, Debug)]
-enum Arithmetic {
-    Add,
-    Sub,
-    Mul,
-    Div,
-    Rem,
-    Cmp,
-    Shl,
-    Shr,
-    Not,
-    And,
-    Or,
-    Xor,
-}
-
-impl Arithmetic {
-    fn poll(self, value: Value) -> Result<Value> {
-        Ok(match self {
-            Self::Add => {
-                let args = get_args(value)?;
-                let [lhs, rhs] = {
-                    let [a1, a2] = args.each_ref().map(|e| get_bytes(e));
-                    [a1?, a2?]
-                };
-                let mut acc = Vec::new();
-                let mut idx = 0;
-                let mut carry = false;
-                (0..)
-                    .map(|i| [lhs.get(i), rhs.get(i)])
-                    .take_while(|e| e.iter().any(Option::is_some))
-                    .map(|a| a.map(Option::<&_>::cloned).map(Option::unwrap_or_default))
-                    .for_each(|[lhs, rhs]| {
-                        let (lhs, c1) = lhs.overflowing_add(rhs);
-                        let (lhs, c2) = lhs.overflowing_add(carry as u8);
-                        carry = c1 || c2 as bool;
-                        acc.push(lhs);
-                        idx += 1;
-                    });
-                carry.then(|| acc.push(1));
-                Value::bytes_move(pop_zeroes(acc))
-            }
-            Self::Sub => todo!(),
-            Self::Mul => todo!(),
-            Self::Div => todo!(),
-            Self::Rem => todo!(),
-            Self::Cmp => {
-                use Ordering::*;
-                fn ord_to_val(ord: Ordering) -> Value {
-                    const LESS: Value = Value::bytes_const(&[0]);
-                    const EQUAL: Value = Value::bytes_const(&[1]);
-                    const GREATER: Value = Value::bytes_const(&[2]);
-                    match ord {
-                        Less => LESS,
-                        Equal => EQUAL,
-                        Greater => GREATER,
-                    }
-                }
-
-                let [lhs, rhs] = get_args(value)?.map(Value::into_bytes);
-                let args = [lhs?, rhs?];
-                let [lhs, rhs] = args.each_ref().map(|e| trim_zeroes(e));
-                match lhs.len().cmp(&rhs.len()) {
-                    Equal => ord_to_val(lhs.iter().rev().cmp(rhs.iter().rev())),
-                    o => ord_to_val(o),
-                }
-            }
-            Self::Shl => {
-                let [lhs, rhs] = get_args(value)?;
-                let offset = get_usize(get_bytes(&rhs)?)?;
-                let lhs = lhs.as_bytes()?;
-                let (bits, bytes) = (offset % 8, offset / 8);
-                let mut acc = vec![0; bytes];
-
-                let mask = |[small, big]: [u8; 2]| (small >> (8 - bits)) | (big << bits);
-                let mut idx: usize = 0;
-                let mut next_window = || {
-                    let res = [
-                        idx.checked_sub(1)
-                            .map(|i| lhs.get(i).copied())
-                            .unwrap_or(Some(0u8))?,
-                        lhs.get(idx).copied().unwrap_or_default(),
-                    ];
-                    idx += 1;
-                    Some(res)
-                };
-                while let Some(window) = next_window() {
-                    acc.push(mask(window))
-                }
-
-                Value::bytes_move(pop_zeroes(acc))
-            }
-            Self::Shr => {
-                let [lhs, rhs] = get_args(value)?;
-                let offset = get_usize(get_bytes(&rhs)?)?;
-                let (bits, bytes) = (offset % 8, offset / 8);
-                let lhs = lhs.as_bytes()?.get(bytes..).unwrap_or(&[]);
-                let mut acc = Vec::new();
-
-                let mask = |[small, big]: [u8; 2]| (small >> bits) | (big << (8 - bits));
-                let mut idx = 0;
-                let mut next_window = || {
-                    let res = [
-                        *lhs.get(idx)?,
-                        lhs.get(idx + 1).copied().unwrap_or_default(),
-                    ];
-                    idx += 1;
-                    Some(res)
-                };
-                while let Some(window) = next_window() {
-                    acc.push(mask(window))
-                }
-
-                Value::bytes_move(pop_zeroes(acc))
-            }
-            Self::Not => {
-                let mut bytes = value;
-                bytes
-                    .as_bytes_mut()?
-                    .make_mut()
-                    .iter_mut()
-                    .for_each(|b| *b = !*b);
-                bytes
-            }
-            Self::And => binary_bytewise(value, std::ops::BitAnd::bitand)
-                .context("in arithmetic function and")?,
-            Self::Or => binary_bytewise(value, std::ops::BitOr::bitor)
-                .context("in arithmetic function or")?,
-            Self::Xor => binary_bytewise(value, std::ops::BitXor::bitxor)
-                .context("in arithmetic function xor")?,
-        })
-    }
-}
-
-fn binary_bytewise(value: Value, func: impl Fn(u8, u8) -> u8) -> Result<Value> {
-    let [lhs, rhs] = get_args(value)?.map(Value::into_bytes);
-    let (mut lhs, rhs) = (lhs?, rhs?);
-    ensure!(
-        lhs.len() == rhs.len(),
-        "non equal length bytes for binary bytewise op:\nrhs ({}): {}\n lhs ({}): {}",
-        lhs.len(),
-        Value::Bytes(lhs),
-        rhs.len(),
-        Value::Bytes(rhs),
-    );
-
-    let (mut out, const_side) = if let Some(_) = lhs.get_mut() {
-        (lhs, rhs)
-    } else {
-        (rhs, lhs)
-    };
-    out.make_mut()
-        .iter_mut()
-        .zip(&*const_side)
-        .for_each(|(lhs, rhs)| *lhs = func(*lhs, *rhs));
-    Ok(Value::Bytes(out))
-}
-
-fn pop_zeroes(mut vec: Vec<u8>) -> Vec<u8> {
-    while let Some(&0) = vec.last() {
-        vec.pop();
-    }
-    vec
-}
-
-fn trim_zeroes(mut slice: &[u8]) -> &[u8] {
-    while let Some(&0) = slice.last() {
-        let [head @ .., _] = slice else { break };
-        slice = head;
-    }
-    slice
-}
-
 fn get_args<const SIZE: usize>(value: Value) -> Result<[Value; SIZE]> {
     let Value::Aggregate(slice) = &value else {
         bail!("expected aggregate, found bytes:\n{value}");
@@ -1085,13 +912,6 @@ fn get_args<const SIZE: usize>(value: Value) -> Result<[Value; SIZE]> {
                 slice.len(),
             )
         })
-}
-
-fn get_bytes(value: &Value) -> Result<&[u8]> {
-    let Value::Bytes(b) = value else {
-        bail!("expected value to be byte string, found aggregate:\n{value}");
-    };
-    Ok(&**b)
 }
 
 // Little endian
