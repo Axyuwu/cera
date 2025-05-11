@@ -316,7 +316,7 @@ pub const BUILTIN_EVAL_FUNC: Value = Value::aggregate_const(
                     &[
                         Value::bytes_const(&[128, 4, 8]),
                         Value::bytes_const(&[231, 2, 7]),
-                        Value::bytes_const(&[4]),
+                        Value::bytes_const(&[31, 1]),
                     ]
                 },
             ),
@@ -336,7 +336,7 @@ pub const BUILTIN_EVAL_FUNC: Value = Value::aggregate_const(
                         Value::aggregate_const(
                             const {
                                 &[
-                                    Value::bytes_const(b"shr"),
+                                    Value::bytes_const(b"div_full"),
                                     Value::aggregate_const(
                                         const { &[Value::bytes_const(&[2]), Value::bytes_const(&[3])] },
                                     ),

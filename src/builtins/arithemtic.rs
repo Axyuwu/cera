@@ -1,3 +1,5 @@
+mod chain2;
+
 use crate::builtins::get_usize;
 use anyhow::{ensure, Context as _, Result};
 use std::{
@@ -96,6 +98,7 @@ pub enum Arithmetic {
     Mul,
     Div,
     Rem,
+    DivFull,
     Cmp,
     Shl,
     Shr,
@@ -116,16 +119,20 @@ impl Arithmetic {
                 let [lhs, rhs] = args.each_ref().map(|e| trim_zeros(e));
 
                 let mut res = ByteStorage::new(std::cmp::max(lhs.len(), rhs.len()) + 1);
+
                 res.iter_mut()
-                    .enumerate()
-                    .fold(false, |carry, (idx, byte)| {
-                        let [lhs, rhs] =
-                            [lhs, rhs].map(|s| s.get(idx).copied().unwrap_or_default());
-                        let (r1, c1) = lhs.overflowing_add(rhs);
-                        let (res, c2) = r1.overflowing_add(carry as u8);
-                        *byte = res;
+                    .zip(
+                        lhs.iter()
+                            .chain(std::iter::repeat(&0))
+                            .zip(rhs.iter().chain(std::iter::repeat(&0))),
+                    )
+                    .fold(false, |carry, (dst, (lhs, rhs))| {
+                        let (r1, c1) = lhs.overflowing_add(*rhs);
+                        let (r2, c2) = r1.overflowing_add(carry as u8);
+                        *dst = r2;
                         c1 || c2
                     });
+
                 Value::bytes_move(res)
             }
             Self::Sub => {
@@ -134,21 +141,26 @@ impl Arithmetic {
                 let [lhs, rhs] = args.each_ref().map(|e| trim_zeros(e));
 
                 let mut res = ByteStorage::new(lhs.len());
+
                 let carry = res
                     .iter_mut()
-                    .enumerate()
-                    .fold(false, |carry, (idx, byte)| {
-                        let [lhs, rhs] =
-                            [lhs, rhs].map(|s| s.get(idx).copied().unwrap_or_default());
-                        let (r1, c1) = lhs.overflowing_sub(rhs);
-                        let (res, c2) = r1.overflowing_sub(carry as u8);
-                        *byte = res;
+                    .zip(
+                        lhs.iter()
+                            .chain(std::iter::repeat(&0))
+                            .zip(rhs.iter().chain(std::iter::repeat(&0))),
+                    )
+                    .fold(false, |carry, (dst, (lhs, rhs))| {
+                        let (r1, c1) = lhs.overflowing_sub(*rhs);
+                        let (r2, c2) = r1.overflowing_sub(carry as u8);
+                        *dst = r2;
                         c1 || c2
                     });
+
                 ensure!(
                     !carry,
                     "sub underflowed, left argument was less than right one"
                 );
+
                 Value::bytes_move(res)
             }
             Self::Mul => {
@@ -176,28 +188,11 @@ impl Arithmetic {
 
                 Value::bytes_move(res)
             }
-            Self::Div => {
-                let [lhs, rhs] = get_args(value)?.map(Value::into_bytes);
-                let args = [lhs?, rhs?];
-                let [lhs, rhs] = args.each_ref().map(|e| trim_zeros(e));
-
-                ensure!(rhs.len() != 0, "div by zero, right argument was zero");
-
-                let mut res = ByteStorage::new(lhs.len() - rhs.len() + 1);
-
-                todo!()
-            }
-            Self::Rem => {
-                let [lhs, rhs] = get_args(value)?.map(Value::into_bytes);
-                let args = [lhs?, rhs?];
-                let [lhs, rhs] = args.each_ref().map(|e| trim_zeros(e));
-
-                ensure!(rhs.len() != 0, "rem by zero, right argument was zero");
-
-                let mut res = ByteStorage::new(rhs.len());
-
-                todo!()
-            }
+            Self::Div => Value::bytes_move(div_full(value)?.0),
+            Self::Rem => Value::bytes_move(div_full(value)?.1),
+            Self::DivFull => Value::aggregate_move(
+                Into::<[ByteStorage; 2]>::into(div_full(value)?).map(Value::bytes_move),
+            ),
             Self::Cmp => {
                 use Ordering::*;
                 fn ord_to_val(ord: Ordering) -> Value {
@@ -228,17 +223,10 @@ impl Arithmetic {
 
                 let mut res = ByteStorage::new(lhs.len() + bytes + 1);
 
-                let mask = |[small, big]: [u8; 2]| (small >> (8 - bits)) | (big << bits);
-
                 res.iter_mut()
                     .skip(bytes)
-                    .enumerate()
-                    .for_each(|(idx, byte)| {
-                        *byte = mask([
-                            idx.checked_sub(1).map(|i| lhs[i]).unwrap_or(0u8),
-                            lhs.get(idx).copied().unwrap_or_default(),
-                        ]);
-                    });
+                    .zip(shl_mod8_iter(lhs, bits as u32))
+                    .for_each(|(dst, src)| *dst = src);
 
                 Value::bytes_move(res)
             }
@@ -251,14 +239,12 @@ impl Arithmetic {
 
                 let mut res = ByteStorage::new(lhs.len().saturating_sub(bytes));
 
-                let mask = |[small, big]: [u8; 2]| (small >> bits) | (big << (8 - bits));
-
                 res.iter_mut()
-                    .enumerate()
-                    .map(|(idx, byte)| (idx + bytes, byte))
-                    .for_each(|(idx, byte)| {
-                        *byte = mask([lhs[idx], lhs.get(idx + 1).copied().unwrap_or_default()])
-                    });
+                    .zip(shr_mod8_iter(
+                        lhs.get(bytes..).unwrap_or_default(),
+                        bits as u32,
+                    ))
+                    .for_each(|(dst, src)| *dst = src);
 
                 Value::bytes_move(res)
             }
@@ -286,6 +272,7 @@ impl Arithmetic {
             b"mul" => Self::Mul,
             b"div" => Self::Div,
             b"rem" => Self::Rem,
+            b"div_full" => Self::DivFull,
             b"cmp" => Self::Cmp,
             b"shl" => Self::Shl,
             b"shr" => Self::Shr,
@@ -322,11 +309,108 @@ fn binary_bytewise(value: Value, func: impl Fn(u8, u8) -> u8) -> Result<Value> {
     Ok(Value::Bytes(out))
 }
 
-fn pop_zeros(mut vec: Vec<u8>) -> Vec<u8> {
-    while let Some(&0) = vec.last() {
-        vec.pop();
+// (Quotient, Remainder)
+fn div_full(value: Value) -> Result<(ByteStorage, ByteStorage)> {
+    let [lhs, rhs] = get_args(value)?.map(Value::into_bytes);
+    let args = [lhs?, rhs?];
+    let [dividend, divisor] = args.each_ref().map(|e| trim_zeros(e));
+
+    ensure!(divisor.len() != 0, "div by zero, right argument was zero");
+
+    if dividend.len() < divisor.len() {
+        return Ok((ByteStorage::new(0), ByteStorage::new(0)));
     }
-    vec
+
+    let mut quo = ByteStorage::new(dividend.len() - divisor.len() + 1);
+    let mut rem = ByteStorage::new(divisor.len() + 1);
+
+    let (dividend_tail, rem_init) = dividend.split_at(dividend.len() - divisor.len());
+
+    rem[..rem_init.len()].copy_from_slice(rem_init);
+
+    let mut dividend_iter = dividend_tail.iter().rev();
+
+    quo.iter_mut().rev().for_each(|dst| {
+        *dst = div_partial(&mut rem, divisor);
+        if let Some(next_byte) = dividend_iter.next() {
+            let range = ..(rem.len() - 1);
+            rem.copy_within(range, 1);
+            rem[0] = *next_byte;
+        }
+    });
+
+    Ok((quo, rem))
+}
+
+fn div_partial(rem: &mut [u8], divisor: &[u8]) -> u8 {
+    assert_eq!(rem.len(), divisor.len() + 1);
+    assert!(!divisor.is_empty());
+
+    (0..8).rev().fold(0, |res, shift| {
+        res | ((try_sub_shift(rem, divisor, shift) as u8) << shift)
+    })
+}
+
+fn try_sub_shift(lhs: &mut [u8], rhs: &[u8], bits: u32) -> bool {
+    assert_eq!(lhs.len(), rhs.len() + 1);
+    assert!(bits < 8);
+
+    if lhs
+        .iter()
+        .zip(shl_mod8_iter(rhs, bits))
+        .rev()
+        .find_map(|(lhs, rhs)| match lhs.cmp(&rhs) {
+            Ordering::Less => Some(true),
+            Ordering::Equal => None,
+            Ordering::Greater => Some(false),
+        })
+        .is_some_and(std::convert::identity)
+    {
+        return false;
+    }
+
+    lhs.iter_mut()
+        .zip(shl_mod8_iter(rhs, bits))
+        .fold(false, |carry, (lhs, rhs)| {
+            let (r1, c1) = lhs.overflowing_sub(rhs);
+            let (r2, c2) = r1.overflowing_sub(carry as u8);
+            *lhs = r2;
+            c1 | c2
+        });
+    true
+}
+
+fn shl_mod8_iter<'t>(
+    val: &'t [u8],
+    bits: u32,
+) -> impl Iterator<Item = u8> + DoubleEndedIterator + ExactSizeIterator + 't {
+    assert!(bits < 8);
+
+    let mask = move |(small, big): (&u8, &u8)| {
+        (small.checked_shr(8 - bits).unwrap_or_default()) | (big << bits)
+    };
+    chain2::Chain2 {
+        inner: std::iter::once(&0).chain(val),
+    }
+    .zip(chain2::Chain2 {
+        inner: val.iter().chain(std::iter::once(&0)),
+    })
+    .map(mask)
+}
+fn shr_mod8_iter<'t>(
+    val: &'t [u8],
+    bits: u32,
+) -> impl Iterator<Item = u8> + DoubleEndedIterator + ExactSizeIterator + 't {
+    assert!(bits < 8);
+
+    let mask = move |(small, big): (&u8, &u8)| {
+        (small >> bits) | (big.checked_shl(8 - bits).unwrap_or_default())
+    };
+    val.iter()
+        .zip(chain2::Chain2 {
+            inner: val.iter().skip(1).chain([0u8].iter()),
+        })
+        .map(mask)
 }
 
 fn trim_zeros(mut slice: &[u8]) -> &[u8] {
