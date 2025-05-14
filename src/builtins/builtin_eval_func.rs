@@ -1,79 +1,167 @@
 use super::Value;
 
-// TODO: make builtin transform allow for a minimal representation that can emit values which can
-// be evaluated using eval, such that the user may create the remaining of the compiler
+// 0: self
+// 1: ATOM_VALUE_TO_EVALUATABLE
+// 2: arg
+// 3: evaluatable (call (ATOM_VALUE_TO_EVALUATABLE arg))
+// 4: builtin_eval evaluatable
 pub const BUILTIN_EVAL_FUNC: Value = Value::aggregate_const(
     const {
         &[
             Value::aggregate_const(const { &[ATOM_VALUE_TO_EVALUATABLE] }),
             Value::aggregate_const(
                 const {
-                    &[Value::aggregate_const(
-                        const {
-                            &[
-                                Value::bytes_const(b"call"),
-                                Value::aggregate_const(
-                                    const { &[Value::bytes_const(&[1]), Value::bytes_const(&[2])] },
-                                ),
-                            ]
-                        },
-                    )]
+                    &[
+                        Value::aggregate_const(
+                            const {
+                                &[
+                                    Value::bytes_const(b"call"),
+                                    Value::aggregate_const(
+                                        const {
+                                            &[
+                                                Value::bytes_const(&[1]), // ATOM_VALUE_TO_EVALUATABLE
+                                                Value::bytes_const(&[2]), // arg
+                                            ]
+                                        },
+                                    ),
+                                ]
+                            },
+                        ),
+                        Value::aggregate_const(
+                            const {
+                                &[
+                                    Value::bytes_const(b"builtin_eval"),
+                                    Value::bytes_const(&[3]), // evaluatable
+                                ]
+                            },
+                        ),
+                    ]
                 },
             ),
         ]
     },
 );
 
+// 0: self
+// 1: 0
+// 2: 1
+// 3: AGGR_MAP
+// 4: "aggregate"
+// 5: "call"
+// 6: "identity"
+// 7: arg
+// 8: type
+// 9: value
+// 10: type == "aggregate"
+// if 10 (call (self, value))) else (identity value)
 const ATOM_VALUE_TO_EVALUATABLE: Value = Value::aggregate_const(
     const {
         &[
-            Value::aggregate_const(const { &[AGGR_MAP, TEST_MAP_FUNC] }),
             Value::aggregate_const(
                 const {
-                    &[Value::aggregate_const(
-                        const {
-                            &[
-                                Value::bytes_const(b"call"),
-                                Value::aggregate_const(
-                                    const {
-                                        &[
-                                            Value::bytes_const(&[1]),
-                                            Value::aggregate_const(
-                                                const {
-                                                    &[
-                                                        Value::bytes_const(&[3]),
-                                                        Value::bytes_const(&[2]),
-                                                    ]
-                                                },
-                                            ),
-                                        ]
-                                    },
-                                ),
-                            ]
-                        },
-                    )]
+                    &[
+                        Value::bytes_const(&[0]),
+                        Value::bytes_const(&[1]),
+                        AGGR_MAP,
+                        Value::bytes_const(b"aggregate"),
+                        Value::bytes_const(b"call"),
+                        Value::bytes_const(b"identity"),
+                    ]
                 },
             ),
-        ]
-    },
-);
-
-const TEST_MAP_FUNC: Value = Value::aggregate_const(
-    const {
-        &[
-            Value::aggregate_const(&[]),
             Value::aggregate_const(
                 const {
-                    &[Value::aggregate_const(
-                        const {
-                            &[
-                                Value::bytes_const(b"identity"),
-                                Value::aggregate_const(
-                                    const { &[Value::bytes_const(&[1]), Value::bytes_const(&[1])] },
-                                ),
-                            ]
-                        },
-                    )]
+                    &[
+                        Value::aggregate_const(
+                            const {
+                                &[
+                                    Value::bytes_const(b"aggr_get"),
+                                    Value::aggregate_const(
+                                        const {
+                                            &[
+                                                Value::bytes_const(&[7]), // arg
+                                                Value::bytes_const(&[1]), // 0
+                                            ]
+                                        },
+                                    ),
+                                ]
+                            },
+                        ),
+                        Value::aggregate_const(
+                            const {
+                                &[
+                                    Value::bytes_const(b"aggr_get"),
+                                    Value::aggregate_const(
+                                        const {
+                                            &[
+                                                Value::bytes_const(&[7]), // arg
+                                                Value::bytes_const(&[2]), // 1
+                                            ]
+                                        },
+                                    ),
+                                ]
+                            },
+                        ),
+                        Value::aggregate_const(
+                            const {
+                                &[
+                                    Value::bytes_const(b"eq"),
+                                    Value::aggregate_const(
+                                        const {
+                                            &[
+                                                Value::bytes_const(&[8]), // type
+                                                Value::bytes_const(&[4]), // "aggregate"
+                                            ]
+                                        },
+                                    ),
+                                ]
+                            },
+                        ),
+                        Value::aggregate_const(
+                            const {
+                                &[
+                                    Value::bytes_const(b"if"),
+                                    Value::aggregate_const(
+                                        const {
+                                            &[
+                                                Value::bytes_const(&[10]), // type == "aggregate"
+                                                Value::aggregate_const(
+                                                    const {
+                                                        &[
+                                                            Value::bytes_const(&[5]), // call
+                                                            Value::aggregate_const(
+                                                                const {
+                                                                    &[
+                                                                        Value::bytes_const(&[3]), // AGGR_MAP
+                                                                        Value::aggregate_const(
+                                                                            const {
+                                                                                &[
+                                                                        Value::bytes_const(&[9]), // value
+                                                                        Value::bytes_const(&[0]), // self
+                                                                    ]
+                                                                            },
+                                                                        ),
+                                                                    ]
+                                                                },
+                                                            ),
+                                                        ]
+                                                    },
+                                                ),
+                                                Value::aggregate_const(
+                                                    const {
+                                                        &[
+                                                            Value::bytes_const(&[6]), // identity
+                                                            Value::bytes_const(&[9]), // value
+                                                        ]
+                                                    },
+                                                ),
+                                            ]
+                                        },
+                                    ),
+                                ]
+                            },
+                        ),
+                    ]
                 },
             ),
         ]
@@ -110,9 +198,7 @@ const AGGR_MAP: Value = Value::aggregate_const(
                                     Value::aggregate_const(
                                         const {
                                             &[
-                                                Value::bytes_const(
-                                                    &[4], // arg
-                                                ),
+                                                Value::bytes_const(&[4]), // arg
                                                 Value::bytes_const(&[1]), // 0
                                             ]
                                         },
@@ -127,9 +213,7 @@ const AGGR_MAP: Value = Value::aggregate_const(
                                     Value::aggregate_const(
                                         const {
                                             &[
-                                                Value::bytes_const(
-                                                    &[4], // arg
-                                                ),
+                                                Value::bytes_const(&[4]), // arg
                                                 Value::bytes_const(&[2]), // 1
                                             ]
                                         },
@@ -206,9 +290,7 @@ const AGGR_MAP_INNER: Value = Value::aggregate_const(
                                     Value::aggregate_const(
                                         const {
                                             &[
-                                                Value::bytes_const(
-                                                    &[7], // arg
-                                                ),
+                                                Value::bytes_const(&[7]), // arg
                                                 Value::bytes_const(&[1]), // 0
                                             ]
                                         },
@@ -223,9 +305,7 @@ const AGGR_MAP_INNER: Value = Value::aggregate_const(
                                     Value::aggregate_const(
                                         const {
                                             &[
-                                                Value::bytes_const(
-                                                    &[7], // arg
-                                                ),
+                                                Value::bytes_const(&[7]), // arg
                                                 Value::bytes_const(&[2]), // 1
                                             ]
                                         },
@@ -240,9 +320,7 @@ const AGGR_MAP_INNER: Value = Value::aggregate_const(
                                     Value::aggregate_const(
                                         const {
                                             &[
-                                                Value::bytes_const(
-                                                    &[7], // arg
-                                                ),
+                                                Value::bytes_const(&[7]), // arg
                                                 Value::bytes_const(&[3]), // 2
                                             ]
                                         },
@@ -265,9 +343,7 @@ const AGGR_MAP_INNER: Value = Value::aggregate_const(
                                     Value::aggregate_const(
                                         const {
                                             &[
-                                                Value::bytes_const(
-                                                    &[10], // idx
-                                                ),
+                                                Value::bytes_const(&[10]), // idx
                                                 Value::bytes_const(&[11]), // len
                                             ]
                                         },
@@ -282,9 +358,7 @@ const AGGR_MAP_INNER: Value = Value::aggregate_const(
                                     Value::aggregate_const(
                                         const {
                                             &[
-                                                Value::bytes_const(
-                                                    &[12], // idx == len
-                                                ),
+                                                Value::bytes_const(&[12]), // idx == len
                                                 Value::aggregate_const(
                                                     const {
                                                         &[
@@ -369,9 +443,7 @@ const AGGR_TAILFUNC: Value = Value::aggregate_const(
                                     Value::aggregate_const(
                                         const {
                                             &[
-                                                Value::bytes_const(
-                                                    &[5], //arg
-                                                ),
+                                                Value::bytes_const(&[5]), //arg
                                                 Value::bytes_const(&[1]), // 0
                                             ]
                                         },
@@ -386,9 +458,7 @@ const AGGR_TAILFUNC: Value = Value::aggregate_const(
                                     Value::aggregate_const(
                                         const {
                                             &[
-                                                Value::bytes_const(
-                                                    &[5], //arg
-                                                ),
+                                                Value::bytes_const(&[5]), //arg
                                                 Value::bytes_const(&[2]), // 1
                                             ]
                                         },
@@ -403,9 +473,7 @@ const AGGR_TAILFUNC: Value = Value::aggregate_const(
                                     Value::aggregate_const(
                                         const {
                                             &[
-                                                Value::bytes_const(
-                                                    &[5], // arg
-                                                ),
+                                                Value::bytes_const(&[5]), // arg
                                                 Value::bytes_const(&[3]), // 2
                                             ]
                                         },
@@ -420,9 +488,7 @@ const AGGR_TAILFUNC: Value = Value::aggregate_const(
                                     Value::aggregate_const(
                                         const {
                                             &[
-                                                Value::bytes_const(
-                                                    &[5], // arg
-                                                ),
+                                                Value::bytes_const(&[5]), // arg
                                                 Value::bytes_const(&[4]), // 3
                                             ]
                                         },
@@ -454,7 +520,7 @@ const AGGR_TAILFUNC: Value = Value::aggregate_const(
                                             &[
                                                 Value::bytes_const(&[6]), // aggr
                                                 Value::bytes_const(&[8]), // idx
-                                                Value::unit(),
+                                                Value::aggregate_const(&[]),
                                             ]
                                         },
                                     ),
@@ -483,9 +549,9 @@ const AGGR_TAILFUNC: Value = Value::aggregate_const(
                                     Value::aggregate_const(
                                         const {
                                             &[
-                                                Value::bytes_const(&[6]), // aggr
-                                                Value::bytes_const(&[8]), // idx
-                                                Value::bytes_const(&[12]),
+                                                Value::bytes_const(&[6]),  // aggr
+                                                Value::bytes_const(&[8]),  // idx
+                                                Value::bytes_const(&[12]), // new_func_val
                                             ]
                                         },
                                     ),

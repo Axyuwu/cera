@@ -607,7 +607,7 @@ impl BuiltinFunc {
                         .ok_or_else(|| anyhow!("index {idx} out of bound of state:\n{state}"))?
                         .clone(),
                 )
-                .context("while processing drops for let binding")?;
+                .context("while processing drops for let builtin")?;
 
                 {
                     let state = state.as_aggregate_mut()?.make_mut();
@@ -623,7 +623,8 @@ impl BuiltinFunc {
                             };
                             *out = Value::unit();
                             Ok(())
-                        })?;
+                        })
+                        .context("while processing drops for let builtin")?;
                 }
 
                 Pending {
@@ -723,7 +724,10 @@ impl BuiltinFunc {
                     get_args(value).context("while getting args to if builtin")?;
                 Step {
                     func: Self::BuiltinEval,
-                    value: match &**cond.as_bytes()? {
+                    value: match &**cond
+                        .as_bytes()
+                        .context("while processing condition for if builtin")?
+                    {
                         &[1] => ifthen,
                         &[0] => ifelse,
                         _ => bail!("non true/false value given to if:\n{cond}"),
@@ -734,7 +738,13 @@ impl BuiltinFunc {
                 value: {
                     let [lhs, rhs] =
                         get_args(value).context("while getting args for eq builtin")?;
-                    match **(lhs.as_bytes()?) == **(rhs.as_bytes()?) {
+                    match **(lhs
+                        .as_bytes()
+                        .context("while evaluating left hand of eq builtin")?)
+                        == **(rhs
+                            .as_bytes()
+                            .context("while evaluating right hand of eq builtin")?)
+                    {
                         true => Value::bytes_const(&[1]),
                         false => Value::bytes_const(&[0]),
                     }
@@ -834,9 +844,7 @@ enum LetArgEval {
 }
 
 fn get_args<const SIZE: usize>(value: Value) -> Result<[Value; SIZE]> {
-    let Value::Aggregate(slice) = &value else {
-        bail!("expected aggregate, found bytes:\n{value}");
-    };
+    let slice = value.as_aggregate().context("while getting args")?;
     TryInto::<&[Value; SIZE]>::try_into(&**slice)
         .map(Clone::clone)
         .with_context(|| {
