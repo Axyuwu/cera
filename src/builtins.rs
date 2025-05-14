@@ -396,10 +396,7 @@ fn atom_to_val(atom: Atom) -> Value {
             Value::bytes("identifier"),
             Value::bytes_move(s.into_boxed_bytes()),
         ]),
-        Atom::String(s) => Value::aggregate_move([
-            Value::bytes("string"),
-            Value::bytes_move(s.into_boxed_bytes()),
-        ]),
+        Atom::Bytes(s) => Value::aggregate_move([Value::bytes("string"), Value::bytes_move(s)]),
     }
 }
 

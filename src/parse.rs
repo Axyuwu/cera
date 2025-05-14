@@ -3,7 +3,7 @@ pub enum Atom {
     Unit,
     Apply(Box<Apply>),
     Identifier(Box<str>),
-    String(Box<str>),
+    Bytes(Box<[u8]>),
 }
 
 /// Left-associative
@@ -20,6 +20,7 @@ pub enum ParseError {
     UnclosedQuote,
     UnclosedParen,
     UnopenedParen,
+    UnfinishedEscape,
 }
 
 pub type ParseResult<T> = Result<T, ParseError>;
@@ -65,7 +66,7 @@ impl Atom {
                 '\"' => {
                     let (string, rem) = parse_string(rem)?;
 
-                    push_atom(&mut curr_frame, Atom::String(string.into()));
+                    push_atom(&mut curr_frame, Atom::Bytes(string.into()));
 
                     str = rem;
                 }
@@ -129,33 +130,75 @@ fn take_while<'t, I: From<&'t str>, T>(
 }
 
 /// Tokenises assuming it started with a " that has been consumed
-fn parse_string(mut str: &str) -> ParseResult<(String, &str)> {
-    let mut acc = String::new();
+fn parse_string(mut str: &str) -> ParseResult<(Vec<u8>, &str)> {
+    let mut acc = Vec::new();
     loop {
         let (Some(char), rem) = split_first_char(str) else {
             return Err(ParseError::UnclosedQuote);
         };
-        let (char, rem) = match char {
-            '\\' => parse_escape(rem)?,
+        let rem = match char {
+            '\\' => parse_escape(rem, &mut acc)?,
             '\"' => break Ok((acc, rem)),
-            c => (Some(c), rem),
+            c => {
+                acc.extend_from_slice(c.encode_utf8(&mut [0; 4]).as_bytes());
+                rem
+            }
         };
-        char.map(|c| acc.push(c));
         str = rem;
     }
 }
 
-fn parse_escape(str: &str) -> ParseResult<(Option<char>, &str)> {
-    let (Some(char), rem) = split_first_char(str) else {
+fn parse_escape<'t>(str: &'t str, buf: &mut Vec<u8>) -> ParseResult<&'t str> {
+    let (Some(char), mut rem) = split_first_char(str) else {
         return Err(ParseError::UnclosedQuote);
     };
-    match char {
-        '\"' => Ok((Some('\"'), rem)),
-        '\\' => Ok((Some('\\'), rem)),
-        '\r' | '\n' => Ok((None, skip_white_space(rem))),
-        'n' => Ok((Some('\n'), rem)),
-        'r' => Ok((Some('\r'), rem)),
-        't' => Ok((Some('\t'), rem)),
-        c => Err(ParseError::InvalidEscape(c)),
-    }
+    buf.push(match char {
+        '\"' => b'\"',
+        '\\' => b'\\',
+        '\r' | '\n' => {
+            return Ok(skip_white_space(rem));
+        }
+        'n' => b'\n',
+        'r' => b'\r',
+        't' => b'\t',
+        '0' => b'\0',
+        'x' => {
+            fn char_to_nibble(char: char) -> Option<u8> {
+                Some(match char {
+                    '0' => 0x0,
+                    '1' => 0x1,
+                    '2' => 0x2,
+                    '3' => 0x3,
+                    '4' => 0x4,
+                    '5' => 0x5,
+                    '6' => 0x6,
+                    '7' => 0x7,
+                    '8' => 0x8,
+                    'a' | 'A' => 0xA,
+                    'b' | 'B' => 0xB,
+                    'c' | 'C' => 0xC,
+                    'd' | 'D' => 0xD,
+                    'e' | 'E' => 0xE,
+                    'f' | 'F' => 0xF,
+                    _ => return None,
+                })
+            }
+            let (Some(large), rem1) = split_first_char(rem) else {
+                return Err(ParseError::UnfinishedEscape);
+            };
+            let Some(large) = char_to_nibble(large) else {
+                return Err(ParseError::InvalidEscape(large));
+            };
+            let (Some(small), rem2) = split_first_char(rem1) else {
+                return Err(ParseError::UnfinishedEscape);
+            };
+            let Some(small) = char_to_nibble(small) else {
+                return Err(ParseError::InvalidEscape(small));
+            };
+            rem = rem2;
+            large << 4 | small
+        }
+        c => return Err(ParseError::InvalidEscape(c)),
+    });
+    Ok(rem)
 }
