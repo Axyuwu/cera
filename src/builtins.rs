@@ -10,7 +10,7 @@ use std::sync::Arc;
 use anyhow::{anyhow, bail, ensure, Context, Result};
 use arithemtic::Arithmetic;
 
-use crate::parse::{Apply, Atom};
+use crate::parse::Atom;
 
 pub trait SliceStorage<T>: Sized {
     fn get(&self) -> &[T];
@@ -384,14 +384,14 @@ pub fn eval_builtin(atom: Atom) -> Result<Value> {
 
 fn atom_to_val(atom: Atom) -> Value {
     match atom {
-        Atom::Unit => Value::aggregate(const { &[Value::bytes_const(b"unit")] }),
-        Atom::Apply(apply) => {
-            let Apply { lhs, rhs } = *apply;
-            Value::aggregate_move([
-                Value::bytes("apply"),
-                Value::aggregate_move([lhs, rhs].map(atom_to_val)),
-            ])
-        }
+        Atom::Aggr(aggr) => Value::aggregate_move([
+            Value::bytes("aggregate"),
+            Value::aggregate_move(
+                <Box<[_]> as IntoIterator>::into_iter(aggr)
+                    .map(atom_to_val)
+                    .collect::<Arc<_>>(),
+            ),
+        ]),
         Atom::Identifier(s) => Value::aggregate_move([
             Value::bytes("identifier"),
             Value::bytes_move(s.into_boxed_bytes()),

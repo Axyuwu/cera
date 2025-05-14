@@ -1,16 +1,8 @@
 #[derive(Debug)]
 pub enum Atom {
-    Unit,
-    Apply(Box<Apply>),
+    Aggr(Box<[Atom]>),
     Identifier(Box<str>),
     Bytes(Box<[u8]>),
-}
-
-/// Left-associative
-#[derive(Debug)]
-pub struct Apply {
-    pub lhs: Atom,
-    pub rhs: Atom,
 }
 
 #[derive(Debug)]
@@ -27,59 +19,49 @@ pub type ParseResult<T> = Result<T, ParseError>;
 
 impl Atom {
     pub fn parse_module(module: &str) -> ParseResult<Self> {
-        fn push_atom(frame_atom: &mut Option<Atom>, rhs: Atom) {
-            *frame_atom = match frame_atom {
-                None => Some(rhs),
-                _ => frame_atom
-                    .take()
-                    .map(|lhs| Atom::Apply(Apply { lhs, rhs }.into())),
-            }
-        }
-
-        let mut stack = Vec::<Option<Atom>>::new();
-        let mut curr_frame = None;
+        let mut stack = Vec::<Vec<Atom>>::new();
+        let mut curr_frame = Vec::new();
         let mut str = module;
         loop {
             str = skip_white_space(str);
-            let (Some(char), rem) = split_first_char(str) else {
+            let (Some(char), mut rem) = split_first_char(str) else {
                 if !stack.is_empty() {
                     break Err(ParseError::UnclosedParen);
                 }
-                break Ok(curr_frame.unwrap_or(Atom::Unit));
+                break Ok(Atom::Aggr(curr_frame.into()));
             };
             match char {
                 '(' => {
                     stack.push(curr_frame);
                     curr_frame = Default::default();
-
-                    str = rem;
                 }
                 ')' => {
-                    let Some(prev_frame) = stack.pop() else {
+                    let Some(mut prev_frame) = stack.pop() else {
                         break Err(ParseError::UnopenedParen);
                     };
-                    let atom = std::mem::replace(&mut curr_frame, prev_frame).unwrap_or(Atom::Unit);
-                    push_atom(&mut curr_frame, atom);
 
-                    str = rem;
+                    prev_frame.push(Atom::Aggr(curr_frame.into()));
+
+                    curr_frame = prev_frame;
                 }
                 '\"' => {
-                    let (string, rem) = parse_string(rem)?;
+                    let (bytes, rem2) = parse_string(rem)?;
 
-                    push_atom(&mut curr_frame, Atom::Bytes(string.into()));
+                    curr_frame.push(Atom::Bytes(bytes.into()));
 
-                    str = rem;
+                    rem = rem2;
                 }
                 c => {
-                    let Some((ident, rem)) = parse_ident(str) else {
+                    let Some((ident, rem2)) = parse_ident(str) else {
                         break Err(ParseError::InvalidChar(c));
                     };
 
-                    push_atom(&mut curr_frame, Atom::Identifier(ident));
+                    curr_frame.push(Atom::Identifier(ident.into()));
 
-                    str = rem;
+                    rem = rem2;
                 }
-            }
+            };
+            str = rem
         }
     }
 }
