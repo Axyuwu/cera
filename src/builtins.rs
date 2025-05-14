@@ -1,4 +1,5 @@
 mod arithemtic;
+mod builtin_eval_func;
 
 use std::convert::Infallible;
 use std::fmt::Display;
@@ -306,79 +307,10 @@ impl Display for Value {
     }
 }
 
-// TODO: make builtin transform allow for a minimal representation that can emit values which can
-// be evaluated using eval, such that the user may create the remaining of the compiler
-pub const BUILTIN_EVAL_FUNC: Value = Value::aggregate_const(
-    const {
-        &[
-            Value::aggregate_const(
-                const {
-                    &[
-                        Value::bytes_const(&[128, 4, 8]),
-                        Value::bytes_const(&[231, 2, 7]),
-                        Value::bytes_const(&[31, 1]),
-                    ]
-                },
-            ),
-            Value::aggregate_const(
-                const {
-                    &[
-                        Value::aggregate_const(
-                            const {
-                                &[
-                                    Value::bytes_const(b"mul"),
-                                    Value::aggregate_const(
-                                        const { &[Value::bytes_const(&[1]), Value::bytes_const(&[2])] },
-                                    ),
-                                ]
-                            },
-                        ),
-                        Value::aggregate_const(
-                            const {
-                                &[
-                                    Value::bytes_const(b"div_full"),
-                                    Value::aggregate_const(
-                                        const { &[Value::bytes_const(&[2]), Value::bytes_const(&[3])] },
-                                    ),
-                                ]
-                            },
-                        ),
-                        Value::aggregate_const(
-                            const {
-                                &[
-                                    Value::bytes_const(b"identity"),
-                                    Value::aggregate_const(
-                                        const {
-                                            &[
-                                                Value::aggregate_const(
-                                                    const {
-                                                        &[
-                                                            Value::bytes_const(&[1]),
-                                                            Value::bytes_const(&[2]),
-                                                            Value::bytes_const(&[3]),
-                                                            Value::bytes_const(&[4]),
-                                                            Value::bytes_const(&[5]),
-                                                        ]
-                                                    },
-                                                ),
-                                                Value::bytes_const(&[6]),
-                                            ]
-                                        },
-                                    ),
-                                ]
-                            },
-                        ),
-                    ]
-                },
-            ),
-        ]
-    },
-);
-
 pub fn eval_builtin(atom: Atom) -> Result<Value> {
     eval(Value::aggregate_move([
         Value::bytes("call"),
-        Value::aggregate_move([BUILTIN_EVAL_FUNC, atom_to_val(atom)]),
+        Value::aggregate_move([builtin_eval_func::BUILTIN_EVAL_FUNC, atom_to_val(atom)]),
     ]))
 }
 
@@ -410,6 +342,7 @@ fn eval(expression: Value) -> Result<Value> {
     }
 }
 
+#[derive(Debug)]
 struct BuiltinThunk {
     state: BuiltinThunkState,
     max_depth: usize,
@@ -489,6 +422,7 @@ impl BuiltinThunk {
     }
 }
 
+#[derive(Debug)]
 struct BuiltinThunkState {
     callback: Option<Box<BuiltinThunkState>>,
     depth: usize,
@@ -510,12 +444,13 @@ enum FuncThunk {
     },
 }
 
+#[derive(Debug)]
 enum BuiltinFunc {
     BuiltinEval,
     Let(Let),
     LetArgEval(LetArgEval),
     Call,
-    If(If),
+    If,
     Eq,
     Identity,
     AggrGet,
@@ -538,7 +473,9 @@ impl BuiltinFunc {
             }
             Self::Let(Let::Init { arg }) => {
                 let [constants, expressions] = {
-                    let [a1, a2] = get_args(value.clone())?.map(|a| a.into_aggregate());
+                    let [a1, a2] = get_args(value.clone())
+                        .context("in let init binding")?
+                        .map(|a| a.into_aggregate());
                     [a1?, a2?]
                 };
                 ensure!(
@@ -584,8 +521,11 @@ impl BuiltinFunc {
                         .take(state.len() - constants.len() - 2)
                         .collect::<Box<_>>();
 
-                    state[idx..].iter_mut().enumerate().rev().try_for_each(
-                        |(i, elem)| -> Result<_> {
+                    state[idx..]
+                        .iter_mut()
+                        .enumerate()
+                        .rev()
+                        .try_for_each(|(i, elem)| -> Result<_> {
                             let [func, args] = get_args(std::mem::replace(elem, Value::unit()))?;
 
                             let mut drops = Vec::new();
@@ -625,8 +565,8 @@ impl BuiltinFunc {
                                 ),
                             ]);
                             Ok(())
-                        },
-                    )?;
+                        })
+                        .context("while parsing step for let init")?;
                 }
                 Pending {
                     value: Value::unit(),
@@ -641,7 +581,8 @@ impl BuiltinFunc {
                 }
             }
             Self::Let(Let::PendingArgEval { idx }) => {
-                let [state, value] = get_args(value)?;
+                let [state, value] =
+                    get_args(value).context("while parsing arg eval in let binding")?;
 
                 if idx + 1 == state.as_aggregate()?.len() {
                     // Breaks the loop, and we get tail call optimization for free!
@@ -660,11 +601,13 @@ impl BuiltinFunc {
                 let mut state = value;
                 let [_func, _args, drops] = get_args(
                     state
-                        .as_aggregate()?
+                        .as_aggregate()
+                        .context("while processing drops for let binding")?
                         .get(idx)
                         .ok_or_else(|| anyhow!("index {idx} out of bound of state:\n{state}"))?
                         .clone(),
-                )?;
+                )
+                .context("while processing drops for let binding")?;
 
                 {
                     let state = state.as_aggregate_mut()?.make_mut();
@@ -769,34 +712,28 @@ impl BuiltinFunc {
                 }
             }
             Self::Call => {
-                let [func, arg] = get_args(value)?;
+                let [func, arg] = get_args(value).context("while getting args for call builtin")?;
                 Step {
                     func: Self::Let(Let::Init { arg: Some(arg) }),
                     value: func,
                 }
             }
-            Self::If(If::Init) => {
-                let [cond, ifthen, ifelse] = get_args(value)?;
-                Pending {
-                    pending_func: Self::If(If::Pending { ifthen, ifelse }),
-                    new_func: Self::BuiltinEval,
-                    value: cond,
-                }
-            }
-            Self::If(If::Pending { ifthen, ifelse }) => {
-                let res = &**value.as_bytes()?;
+            Self::If => {
+                let [cond, ifthen, ifelse] =
+                    get_args(value).context("while getting args to if builtin")?;
                 Step {
                     func: Self::BuiltinEval,
-                    value: match res {
+                    value: match &**cond.as_bytes()? {
                         &[1] => ifthen,
                         &[0] => ifelse,
-                        _ => bail!("non true/false value given to if:\n{value}"),
+                        _ => bail!("non true/false value given to if:\n{cond}"),
                     },
                 }
             }
             Self::Eq => Done {
                 value: {
-                    let [lhs, rhs] = get_args(value)?;
+                    let [lhs, rhs] =
+                        get_args(value).context("while getting args for eq builtin")?;
                     match **(lhs.as_bytes()?) == **(rhs.as_bytes()?) {
                         true => Value::bytes_const(&[1]),
                         false => Value::bytes_const(&[0]),
@@ -806,7 +743,8 @@ impl BuiltinFunc {
             Self::Identity => Done { value },
             Self::AggrGet => Done {
                 value: {
-                    let [value, idx] = get_args(value)?;
+                    let [value, idx] =
+                        get_args(value).context("while getting args for aggrget builtin")?;
                     let idx = get_usize(idx.as_bytes()?)?;
                     let aggr = value.as_aggregate()?;
                     aggr.get(idx)
@@ -816,7 +754,8 @@ impl BuiltinFunc {
             },
             Self::AggrSet => Done {
                 value: {
-                    let [mut value, idx, src] = get_args(value)?;
+                    let [mut value, idx, src] =
+                        get_args(value).context("while getting args for aggrget builtin")?;
                     let idx = get_usize(idx.as_bytes()?)?;
                     let aggr = value.as_aggregate_mut()?;
                     let Some(dst) = aggr.make_mut().get_mut(idx) else {
@@ -837,7 +776,9 @@ impl BuiltinFunc {
                 ),
             },
             Self::Arithmetic(arithmetic) => Done {
-                value: arithmetic.poll(value)?,
+                value: arithmetic
+                    .poll(value)
+                    .context("while evaluating arithmetic builtin")?,
             },
         })
     }
@@ -846,7 +787,7 @@ impl BuiltinFunc {
             b"builtin_eval" => Self::BuiltinEval,
             b"let" => Self::Let(Let::Init { arg: None }),
             b"call" => Self::Call,
-            b"if" => Self::If(If::Init),
+            b"if" => Self::If,
             b"eq" => Self::Eq,
             b"identity" => Self::Identity,
             b"aggr_get" => Self::AggrGet,
@@ -864,6 +805,7 @@ impl BuiltinFunc {
     }
 }
 
+#[derive(Debug)]
 enum Let {
     Init { arg: Option<Value> },
     PendingArgEval { idx: usize },
@@ -871,6 +813,7 @@ enum Let {
     PendingEval { state: Value, idx: usize },
 }
 
+#[derive(Debug)]
 enum LetArgEval {
     Init {
         state: Value,
@@ -888,11 +831,6 @@ enum LetArgEval {
         current: EvalSlice<Value>,
         curr_idx: usize,
     },
-}
-
-enum If {
-    Init,
-    Pending { ifthen: Value, ifelse: Value },
 }
 
 fn get_args<const SIZE: usize>(value: Value) -> Result<[Value; SIZE]> {
