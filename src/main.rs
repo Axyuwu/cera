@@ -1,5 +1,6 @@
 mod builtins;
 mod parse;
+pub mod utils;
 
 fn main() {
     let input = std::fs::read_to_string("./examples/hello_world_interpreted.cera").unwrap();

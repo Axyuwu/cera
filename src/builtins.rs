@@ -1,5 +1,6 @@
 mod arithemtic;
 mod builtin_eval_func;
+mod world;
 
 use std::convert::Infallible;
 use std::fmt::Display;
@@ -17,6 +18,7 @@ pub trait SliceStorage<T>: Sized {
     fn get(&self) -> &[T];
     fn get_mut(&mut self) -> &mut [T];
     fn try_new(slice: &[T]) -> Option<Self>;
+    fn eq(&self, rhs: &[T]) -> bool;
 }
 
 #[derive(Debug, Clone)]
@@ -46,6 +48,10 @@ impl SliceStorage<u8> for U8SliceStorage {
             })
         }
     }
+
+    fn eq(&self, rhs: &[u8]) -> bool {
+        self.get() == rhs
+    }
 }
 impl<T> SliceStorage<T> for Infallible {
     fn get(&self) -> &[T] {
@@ -57,6 +63,10 @@ impl<T> SliceStorage<T> for Infallible {
     }
 
     fn try_new(_slice: &[T]) -> Option<Self> {
+        unreachable!()
+    }
+
+    fn eq(&self, _rhs: &[T]) -> bool {
         unreachable!()
     }
 }
@@ -110,6 +120,14 @@ impl<T: HasSliceStorage> EvalSlice<T> {
                 self.make_mut()
             }
             EvalSlice::Inline(items) => items.get_mut(),
+        }
+    }
+    fn addr_eq(&self, rhs: &Self) -> bool {
+        match (self, rhs) {
+            (Self::Inline(lhs), rhs) => lhs.eq(&*rhs),
+            (Self::Borrowed(lhs), Self::Borrowed(rhs)) => std::ptr::eq(lhs, rhs),
+            (Self::Arc(lhs), Self::Arc(rhs)) => std::ptr::eq(&*lhs, &*rhs),
+            _ => false,
         }
     }
 }
@@ -298,6 +316,23 @@ impl Value {
             }
         }
         Ok(())
+    }
+    fn from_res<I1, I2, F1, F2>(res: std::result::Result<I1, I2>, f1: F1, f2: F2) -> Value
+    where
+        F1: FnOnce(I1) -> Value,
+        F2: FnOnce(I2) -> Value,
+    {
+        match res {
+            Ok(i1) => Value::aggregate_move([Value::bytes_const(b"ok"), f1(i1)]),
+            Err(i2) => Value::aggregate_move([Value::bytes_const(b"err"), f2(i2)]),
+        }
+    }
+    fn addr_eq(&self, rhs: &Self) -> bool {
+        match (self, rhs) {
+            (Self::Bytes(lhs), Self::Bytes(rhs)) => lhs.addr_eq(rhs),
+            (Self::Aggregate(lhs), Self::Aggregate(rhs)) => lhs.addr_eq(rhs),
+            _ => false,
+        }
     }
 }
 
