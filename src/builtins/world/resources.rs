@@ -1,15 +1,20 @@
+use anyhow::anyhow;
 use std::{
     fs::File,
     io::{Read, Stderr, Stdin, Stdout, Write},
     net::{TcpListener, TcpStream, UdpSocket},
-    process::{ChildStderr, ChildStdin, ChildStdout},
+    process::{Child, ChildStderr, ChildStdin, ChildStdout},
     thread::JoinHandle,
 };
 
 use anyhow::{bail, Result};
-use parking_lot::Mutex;
 
-use crate::builtins::{usize_to_val, Value};
+use crate::{
+    builtins::{usize_to_val, Value},
+    utils::sync::{spinmutex::SpinMutex, sync_map::SyncMapKey},
+};
+
+use super::World;
 
 #[derive(Debug)]
 pub enum Io {
@@ -17,14 +22,38 @@ pub enum Io {
     Stdin(Stdin),
     Stdout(Stdout),
     Stderr(Stderr),
+    Child(Child),
     ChildStdin(ChildStdin),
-    ChildStdout(Mutex<ChildStdout>),
-    ChildStderr(Mutex<ChildStderr>),
+    ChildStdout(SpinMutex<Option<ChildStdout>>),
+    ChildStderr(SpinMutex<Option<ChildStderr>>),
     TcpStream(TcpStream),
     TcpListener(TcpListener),
     UdpSocket(UdpSocket),
-    Thread(JoinHandle<Result<Value>>),
-    AtomicCell(Mutex<Value>),
+    Thread(Thread),
+    AtomicCell(SpinMutex<Value>),
+}
+
+// When an new thread is created, this handle should always be created, including for the initial
+// eval thread
+#[derive(Debug)]
+pub struct Thread {
+    join_handle: SpinMutex<Option<JoinHandle<Result<Value>>>>,
+    thread: std::thread::Thread,
+}
+
+impl Thread {
+    pub fn current() -> Self {
+        Self {
+            join_handle: SpinMutex::new(None),
+            thread: std::thread::current(),
+        }
+    }
+    pub fn new(handle: JoinHandle<Result<Value>>) -> Self {
+        Self {
+            thread: handle.thread().clone(),
+            join_handle: SpinMutex::new(Some(handle)),
+        }
+    }
 }
 
 fn io_err_to_val(error: std::io::Error) -> Value {
@@ -75,6 +104,7 @@ impl Io {
             Io::Stdin(_) => "stdin",
             Io::Stdout(_) => "stdout",
             Io::Stderr(_) => "stderr",
+            Io::Child(_) => "child",
             Io::ChildStdin(_) => "child stdin",
             Io::ChildStdout(_) => "child stdout",
             Io::ChildStderr(_) => "child stderr",
@@ -92,8 +122,24 @@ impl Io {
         let res = match self {
             Io::File(file) => read(file, buf),
             Io::Stdin(stdin) => read(stdin, buf),
-            Io::ChildStdout(child_stdout) => read(&mut *child_stdout.lock(), buf),
-            Io::ChildStderr(child_stderr) => read(&mut *child_stderr.lock(), buf),
+            Io::ChildStdout(child_stdout) => {
+                let stdout = child_stdout.apply(Option::take);
+                let Some(mut stdout) = stdout else {
+                    bail!("attempted to use child stdout while already in use from another thread");
+                };
+                let res = read(&mut stdout, buf);
+                child_stdout.apply(|dst| *dst = Some(stdout));
+                res
+            }
+            Io::ChildStderr(child_stderr) => {
+                let stderr = child_stderr.apply(Option::take);
+                let Some(mut stderr) = stderr else {
+                    bail!("attempted to use child stderr while already in use from another thread");
+                };
+                let res = read(&mut stderr, buf);
+                child_stderr.apply(|dst| *dst = Some(stderr));
+                res
+            }
             Io::TcpStream(tcp_stream) => read(tcp_stream, buf),
             o => bail!("attempted to read {}", o.name()),
         };
@@ -127,15 +173,42 @@ impl Io {
         };
         Ok(Value::from_res(res, |()| Value::unit(), io_err_to_val))
     }
+    pub fn thread_join(&self) -> Result<Value> {
+        match self {
+            Io::Thread(Thread { join_handle, .. }) => join_handle
+                .apply(Option::take)
+                .ok_or_else(|| anyhow!("attempting to join already moved handle"))?
+                .join()
+                .map_err(std::panic::resume_unwind)?,
+            o => bail!("attempted to thread_join {}", o.name()),
+        }
+    }
+    pub fn thread_is_finished(&self) -> Result<bool> {
+        match self {
+            Io::Thread(Thread { join_handle, .. }) => Ok(join_handle.apply(|join_handle| {
+                join_handle
+                    .as_ref()
+                    .map(JoinHandle::is_finished)
+                    .unwrap_or(false)
+            })),
+            o => bail!("attempted to thread_is_finished {}", o.name()),
+        }
+    }
+    pub fn thread_unpark(&self) -> Result<()> {
+        match self {
+            Io::Thread(Thread { thread, .. }) => Ok(thread.unpark()),
+            o => bail!("attempted to thread_is_finished {}", o.name()),
+        }
+    }
     pub fn cell_clone(&self) -> Result<Value> {
         match self {
-            Io::AtomicCell(mutex) => Ok(mutex.lock().clone()),
+            Io::AtomicCell(spin_mutex) => spin_mutex.apply(|e| Ok(e.clone())),
             o => bail!("attempted to cell_clone {}", o.name()),
         }
     }
     pub fn cell_swap(&self, new: Value) -> Result<Value> {
         match self {
-            Io::AtomicCell(mutex) => Ok(std::mem::replace(&mut mutex.lock(), new)),
+            Io::AtomicCell(spin_mutex) => spin_mutex.apply(|dst| Ok(std::mem::replace(dst, new))),
             o => bail!("attempted to cell_swap {}", o.name()),
         }
     }
@@ -143,16 +216,14 @@ impl Io {
     /// borrowed types, or if it is equal for inline storage
     pub fn cell_cas(&self, expected: Value, new: Value) -> Result<Value> {
         let res = match self {
-            Io::AtomicCell(mutex) => {
-                let mut lock = mutex.lock();
-                let value = &mut *lock;
+            Io::AtomicCell(mutex) => mutex.apply(|value| {
                 if !value.addr_eq(&expected) {
                     Err(value.clone())
                 } else {
                     *value = new;
                     Ok(())
                 }
-            }
+            }),
             o => bail!("attempted to cell_cas {}", o.name()),
         };
         Ok(Value::from_res(

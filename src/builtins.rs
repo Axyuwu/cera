@@ -11,6 +11,8 @@ use std::sync::Arc;
 
 use anyhow::{anyhow, bail, ensure, Context, Result};
 use arithemtic::Arithmetic;
+use world::World;
+use world::WorldIo;
 
 use crate::parse::Atom;
 
@@ -139,43 +141,49 @@ pub enum Value {
 }
 
 impl Value {
-    const fn unit() -> Self {
+    pub const fn unit() -> Self {
         Self::aggregate_const(&[])
     }
-    const fn aggregate_const(slice: &'static [Self]) -> Self {
+    pub fn is_unit(&self) -> bool {
+        match self {
+            Self::Aggregate(slice) if slice.len() == 0 => true,
+            _ => false,
+        }
+    }
+    pub const fn aggregate_const(slice: &'static [Self]) -> Self {
         Self::Aggregate(EvalSlice::Borrowed(slice))
     }
-    fn aggregate(slice: &'static (impl AsRef<[Self]> + ?Sized)) -> Self {
+    pub fn aggregate(slice: &'static (impl AsRef<[Self]> + ?Sized)) -> Self {
         Self::aggregate_const(slice.as_ref())
     }
-    fn aggregate_cloned(slice: impl AsRef<[Self]>) -> Self {
+    pub fn aggregate_cloned(slice: impl AsRef<[Self]>) -> Self {
         Self::Aggregate(EvalSlice::Arc(slice.as_ref().into()))
     }
-    fn aggregate_move(slice: impl Into<Arc<[Self]>>) -> Self {
+    pub fn aggregate_move(slice: impl Into<Arc<[Self]>>) -> Self {
         Self::Aggregate(EvalSlice::Arc(slice.into()))
     }
-    fn into_aggregate(self) -> Result<EvalSlice<Value>> {
+    pub fn into_aggregate(self) -> Result<EvalSlice<Value>> {
         let Self::Aggregate(s) = self else {
             bail!("expected aggregate, found bytes:\n{}", self)
         };
         Ok(s)
     }
-    fn as_aggregate(&self) -> Result<&EvalSlice<Value>> {
+    pub fn as_aggregate(&self) -> Result<&EvalSlice<Value>> {
         let Self::Aggregate(s) = self else {
             bail!("expected aggregate, found bytes:\n{}", self)
         };
         Ok(s)
     }
-    fn as_aggregate_mut(&mut self) -> Result<&mut EvalSlice<Value>> {
+    pub fn as_aggregate_mut(&mut self) -> Result<&mut EvalSlice<Value>> {
         let Self::Aggregate(s) = self else {
             bail!("expected aggregate, found bytes:\n{}", self)
         };
         Ok(s)
     }
-    const fn bytes_const(slice: &'static [u8]) -> Self {
+    pub const fn bytes_const(slice: &'static [u8]) -> Self {
         Self::Bytes(EvalSlice::Borrowed(slice))
     }
-    fn bytes(slice: &'static (impl AsRef<[u8]> + ?Sized)) -> Self {
+    pub fn bytes(slice: &'static (impl AsRef<[u8]> + ?Sized)) -> Self {
         let bytes = slice.as_ref();
         if let Some(slice) = U8SliceStorage::try_new(bytes) {
             Self::Bytes(EvalSlice::Inline(slice))
@@ -183,7 +191,7 @@ impl Value {
             Self::Bytes(EvalSlice::Borrowed(bytes))
         }
     }
-    fn bytes_cloned(slice: impl AsRef<[u8]>) -> Self {
+    pub fn bytes_cloned(slice: impl AsRef<[u8]>) -> Self {
         let bytes = slice.as_ref();
         if let Some(slice) = U8SliceStorage::try_new(bytes) {
             Self::Bytes(EvalSlice::Inline(slice))
@@ -191,26 +199,26 @@ impl Value {
             Self::Bytes(EvalSlice::Arc(bytes.into()))
         }
     }
-    fn bytes_move(slice: impl Into<Arc<[u8]>> + AsRef<[u8]>) -> Self {
+    pub fn bytes_move(slice: impl Into<Arc<[u8]>> + AsRef<[u8]>) -> Self {
         if let Some(slice) = U8SliceStorage::try_new(slice.as_ref()) {
             Self::Bytes(EvalSlice::Inline(slice))
         } else {
             Self::Bytes(EvalSlice::Arc(slice.into()))
         }
     }
-    fn into_bytes(self) -> Result<EvalSlice<u8>> {
+    pub fn into_bytes(self) -> Result<EvalSlice<u8>> {
         let Self::Bytes(s) = self else {
             bail!("expected bytes, found aggregate:\n{}", self)
         };
         Ok(s)
     }
-    fn as_bytes(&self) -> Result<&EvalSlice<u8>> {
+    pub fn as_bytes(&self) -> Result<&EvalSlice<u8>> {
         let Self::Bytes(s) = self else {
             bail!("expected bytes, found aggregate:\n{}", self)
         };
         Ok(s)
     }
-    fn as_bytes_mut(&mut self) -> Result<&mut EvalSlice<u8>> {
+    pub fn as_bytes_mut(&mut self) -> Result<&mut EvalSlice<u8>> {
         let Self::Bytes(s) = self else {
             bail!("expected bytes, found aggregate:\n{}", self)
         };
@@ -317,7 +325,7 @@ impl Value {
         }
         Ok(())
     }
-    fn from_res<I1, I2, F1, F2>(res: std::result::Result<I1, I2>, f1: F1, f2: F2) -> Value
+    pub fn from_res<I1, I2, F1, F2>(res: std::result::Result<I1, I2>, f1: F1, f2: F2) -> Value
     where
         F1: FnOnce(I1) -> Value,
         F2: FnOnce(I2) -> Value,
@@ -327,7 +335,7 @@ impl Value {
             Err(i2) => Value::aggregate_move([Value::bytes_const(b"err"), f2(i2)]),
         }
     }
-    fn addr_eq(&self, rhs: &Self) -> bool {
+    pub fn addr_eq(&self, rhs: &Self) -> bool {
         match (self, rhs) {
             (Self::Bytes(lhs), Self::Bytes(rhs)) => lhs.addr_eq(rhs),
             (Self::Aggregate(lhs), Self::Aggregate(rhs)) => lhs.addr_eq(rhs),
@@ -343,10 +351,14 @@ impl Display for Value {
 }
 
 pub fn eval_builtin(atom: Atom) -> Result<Value> {
-    eval(Value::aggregate_move([
-        Value::bytes("call"),
-        Value::aggregate_move([builtin_eval_func::BUILTIN_EVAL_FUNC, atom_to_val(atom)]),
-    ]))
+    let (world, world_handle) = World::new();
+    eval(
+        Value::aggregate_move([
+            Value::bytes("call"),
+            Value::aggregate_move([builtin_eval_func::BUILTIN_EVAL_FUNC, atom_to_val(atom)]),
+        ]),
+        world,
+    )
 }
 
 fn atom_to_val(atom: Atom) -> Value {
@@ -367,10 +379,13 @@ fn atom_to_val(atom: Atom) -> Value {
     }
 }
 
-fn eval(expression: Value) -> Result<Value> {
+pub fn eval(expression: Value, mut world: World) -> Result<Value> {
     let mut thunk = BuiltinThunk::new(expression, 100);
     loop {
-        match thunk.call()? {
+        match thunk
+            .call(&mut world)
+            .with_context(|| format!("world state: {world:?}"))?
+        {
             ControlFlow::Continue(t) => thunk = t,
             ControlFlow::Break(b) => break Ok(b),
         }
@@ -396,7 +411,7 @@ impl BuiltinThunk {
             value: expression,
         }
     }
-    fn call(self) -> Result<ControlFlow<Value, Self>> {
+    fn call(self, world: &mut World) -> Result<ControlFlow<Value, Self>> {
         let Self {
             state,
             max_depth,
@@ -409,7 +424,7 @@ impl BuiltinThunk {
             depth,
             func,
         } = state;
-        Ok(match (func.poll(value)?, callback) {
+        Ok(match (func.poll(value, world)?, callback) {
             (
                 Pending {
                     pending_func,
@@ -493,10 +508,11 @@ enum BuiltinFunc {
     AggrLen,
     AggrMake,
     Arithmetic(Arithmetic),
+    WorldIo(WorldIo),
 }
 
 impl BuiltinFunc {
-    fn poll(self, value: Value) -> Result<FuncThunk> {
+    fn poll(self, value: Value, world: &mut World) -> Result<FuncThunk> {
         use FuncThunk::*;
         Ok(match self {
             Self::BuiltinEval => {
@@ -825,6 +841,11 @@ impl BuiltinFunc {
                     .poll(value)
                     .context("while evaluating arithmetic builtin")?,
             },
+            Self::WorldIo(world_io) => Done {
+                value: world_io
+                    .poll(value, world)
+                    .context("while evaluating worldio builtin")?,
+            },
         })
     }
     fn from_value(value: &Value) -> Result<Self> {
@@ -842,6 +863,8 @@ impl BuiltinFunc {
             s => {
                 if let Some(a) = Arithmetic::from_ident(s) {
                     Self::Arithmetic(a)
+                } else if let Some(w) = WorldIo::from_ident(s) {
+                    Self::WorldIo(w)
                 } else {
                     bail!("invalid builtin function name:\n{value}")
                 }
@@ -878,7 +901,7 @@ enum LetArgEval {
     },
 }
 
-fn get_args<const SIZE: usize>(value: Value) -> Result<[Value; SIZE]> {
+pub fn get_args<const SIZE: usize>(value: Value) -> Result<[Value; SIZE]> {
     let slice = value.as_aggregate().context("while getting args")?;
     TryInto::<&[Value; SIZE]>::try_into(&**slice)
         .map(Clone::clone)
@@ -891,7 +914,8 @@ fn get_args<const SIZE: usize>(value: Value) -> Result<[Value; SIZE]> {
 }
 
 // Little endian
-fn get_usize(bytes: &[u8]) -> Result<usize> {
+
+pub fn get_usize(bytes: &[u8]) -> Result<usize> {
     bytes
         .iter()
         .rev()
@@ -907,7 +931,7 @@ fn get_usize(bytes: &[u8]) -> Result<usize> {
         })
 }
 
-fn usize_to_val(usize: usize) -> Value {
+pub fn usize_to_val(usize: usize) -> Value {
     let bytes = usize.to_le_bytes();
     let idx = bytes
         .iter()
@@ -917,4 +941,19 @@ fn usize_to_val(usize: usize) -> Value {
         .map(|(i, _)| i + 1)
         .unwrap_or(0);
     Value::bytes_cloned(&bytes[0..idx])
+}
+
+pub fn get_u128(bytes: &[u8]) -> Result<u128> {
+    bytes
+        .iter()
+        .rev()
+        .try_fold(0u128, |acc, byte| {
+            acc.checked_mul(u8::MAX as u128)?.checked_add(*byte as u128)
+        })
+        .ok_or_else(|| {
+            anyhow!(
+                "overflowed trying to get a usize from bytes:\n{}",
+                Value::bytes_cloned(bytes)
+            )
+        })
 }
