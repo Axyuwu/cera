@@ -1,5 +1,5 @@
 mod arithemtic;
-mod builtin_eval_func;
+mod builtin_values;
 mod world;
 
 use std::convert::Infallible;
@@ -355,7 +355,7 @@ pub fn eval_builtin(atom: Atom) -> Result<Value> {
     eval(
         Value::aggregate_move([
             Value::bytes("call"),
-            Value::aggregate_move([builtin_eval_func::BUILTIN_EVAL_FUNC, atom_to_val(atom)]),
+            Value::aggregate_move([builtin_values::BUILTIN_EVAL_FUNC, atom_to_val(atom)]),
         ]),
         world,
     )
