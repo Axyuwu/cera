@@ -1,8 +1,9 @@
 mod arithemtic;
-mod builtin_values;
+pub mod builtin_values;
 mod world;
 
 use std::convert::Infallible;
+use std::fmt::Debug;
 use std::fmt::Display;
 use std::fmt::Write;
 use std::ops::ControlFlow;
@@ -10,7 +11,11 @@ use std::ops::Deref;
 use std::sync::Arc;
 
 use anyhow::{anyhow, bail, ensure, Context, Result};
+use arithemtic::trim_zeros;
 use arithemtic::Arithmetic;
+use builtin_values::BuiltinImport;
+use builtin_values::FALSE;
+use builtin_values::TRUE;
 use world::World;
 use world::WorldIo;
 
@@ -134,10 +139,16 @@ impl<T: HasSliceStorage> EvalSlice<T> {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub enum Value {
     Bytes(EvalSlice<u8>),
     Aggregate(EvalSlice<Value>),
+}
+
+impl Debug for Value {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        <Self as Display>::fmt(&self, f)
+    }
 }
 
 impl Value {
@@ -501,7 +512,7 @@ enum BuiltinFunc {
     LetArgEval(LetArgEval),
     Call,
     If,
-    Eq,
+    BytesEq,
     Identity,
     AggrGet,
     AggrSet,
@@ -509,6 +520,7 @@ enum BuiltinFunc {
     AggrMake,
     Arithmetic(Arithmetic),
     WorldIo(WorldIo),
+    BuiltinImport(BuiltinImport),
 }
 
 impl BuiltinFunc {
@@ -516,9 +528,9 @@ impl BuiltinFunc {
         use FuncThunk::*;
         Ok(match self {
             Self::BuiltinEval => {
-                let [ident, value] = get_args(value)?;
+                let [ident, value] = get_args(value).context("in builtin_eval")?;
                 Step {
-                    func: BuiltinFunc::from_value(&ident)?,
+                    func: BuiltinFunc::from_value(&ident).context("in builtin_eval")?,
                     value,
                 }
             }
@@ -775,29 +787,24 @@ impl BuiltinFunc {
                     get_args(value).context("while getting args to if builtin")?;
                 Step {
                     func: Self::BuiltinEval,
-                    value: match &**cond
-                        .as_bytes()
-                        .context("while processing condition for if builtin")?
-                    {
+                    value: match trim_zeros(
+                        &**cond
+                            .as_bytes()
+                            .context("while processing condition for if builtin")?,
+                    ) {
                         &[1] => ifthen,
-                        &[0] => ifelse,
-                        _ => bail!("non true/false value given to if:\n{cond}"),
+                        &[] => ifelse,
+                        _ => bail!("non zero or one value given to if:\n{cond}"),
                     },
                 }
             }
-            Self::Eq => Done {
+            Self::BytesEq => Done {
                 value: {
-                    let [lhs, rhs] =
-                        get_args(value).context("while getting args for eq builtin")?;
-                    match **(lhs
-                        .as_bytes()
-                        .context("while evaluating left hand of eq builtin")?)
-                        == **(rhs
-                            .as_bytes()
-                            .context("while evaluating right hand of eq builtin")?)
-                    {
-                        true => Value::bytes_const(&[1]),
-                        false => Value::bytes_const(&[0]),
+                    let [lhs, rhs] = get_args(value)?.map(Value::into_bytes);
+
+                    match *lhs? == *rhs? {
+                        true => TRUE,
+                        false => FALSE,
                     }
                 },
             },
@@ -831,7 +838,7 @@ impl BuiltinFunc {
             },
             Self::AggrMake => Done {
                 value: Value::aggregate_move(
-                    std::iter::repeat(Value::aggregate_const(&[]))
+                    std::iter::repeat(Value::unit())
                         .take(get_usize(value.as_bytes()?)?)
                         .collect::<Box<_>>(),
                 ),
@@ -846,6 +853,11 @@ impl BuiltinFunc {
                     .poll(value, world)
                     .context("while evaluating worldio builtin")?,
             },
+            Self::BuiltinImport(builtin_import) => Done {
+                value: builtin_import
+                    .poll(value)
+                    .context("while evaluating builtin_import builtin")?,
+            },
         })
     }
     fn from_value(value: &Value) -> Result<Self> {
@@ -854,7 +866,7 @@ impl BuiltinFunc {
             b"let" => Self::Let(Let::Init { arg: None }),
             b"call" => Self::Call,
             b"if" => Self::If,
-            b"eq" => Self::Eq,
+            b"bytes_eq" => Self::BytesEq,
             b"identity" => Self::Identity,
             b"aggr_get" => Self::AggrGet,
             b"aggr_set" => Self::AggrSet,
@@ -865,6 +877,8 @@ impl BuiltinFunc {
                     Self::Arithmetic(a)
                 } else if let Some(w) = WorldIo::from_ident(s) {
                     Self::WorldIo(w)
+                } else if let Some(b) = BuiltinImport::from_ident(s) {
+                    Self::BuiltinImport(b)
                 } else {
                     bail!("invalid builtin function name:\n{value}")
                 }

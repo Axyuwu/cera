@@ -333,9 +333,7 @@ impl WorldIo {
             WorldIo::ProcessChildId => todo!(),
             WorldIo::ProcessChildWait => todo!(),
             WorldIo::ProcessChildHasExited => todo!(),
-            WorldIo::ProcessAbort => {
-                world_map_no_arg(&world, &self, value, || std::process::abort())
-            }
+            WorldIo::ProcessAbort => bail!("program aborted:\n{value}"),
             WorldIo::ProcessExit => todo!(),
             WorldIo::ProcessId => todo!(),
             WorldIo::FsFileOpen => todo!(),
@@ -571,30 +569,28 @@ fn val_to_offset_slice(value: &Value) -> Result<&[u8]> {
     let aggr = value.as_aggregate()?;
     if aggr.len() != 3 {
         bail!(
-            "expected 3 values, an offset, a len, and a buffer, found {} values instead",
+            "expected 3 values, a start, an end, and a buffer, found {} values instead",
             aggr.len()
         )
     }
-    let (offset, len, buf) = (
+    let (start, end, buf) = (
         (|| get_usize(aggr[0].as_bytes()?))().context("while getting offset of slice")?,
         (|| get_usize(aggr[1].as_bytes()?))().context("while getting len of slice")?,
         aggr[2].as_bytes().context("while getting buf of slice")?,
     );
     Ok(buf
-        .get(offset..)
-        .ok_or_else(|| anyhow!("offset out of bound of slice"))?
-        .get(..len)
-        .ok_or_else(|| anyhow!("len out of bound of slice"))?)
+        .get(start..end)
+        .ok_or_else(|| anyhow!("indices out of bounds of slice"))?)
 }
 fn val_to_offset_slice_mut(value: &mut Value) -> Result<&mut [u8]> {
     let aggr = value.as_aggregate_mut()?.make_mut();
     if aggr.len() != 3 {
         bail!(
-            "expected 3 values, an offset, a len, and a buffer, found {} values instead",
+            "expected 3 values, a start, an end, and a buffer, found {} values instead",
             aggr.len()
         )
     }
-    let (offset, len, buf) = (
+    let (start, end, buf) = (
         (|| get_usize(aggr[0].as_bytes()?))().context("while getting offset of slice")?,
         (|| get_usize(aggr[1].as_bytes()?))().context("while getting len of slice")?,
         aggr[2]
@@ -603,10 +599,8 @@ fn val_to_offset_slice_mut(value: &mut Value) -> Result<&mut [u8]> {
             .make_mut(),
     );
     Ok(buf
-        .get_mut(offset..)
-        .ok_or_else(|| anyhow!("offset out of bound of slice"))?
-        .get_mut(..len)
-        .ok_or_else(|| anyhow!("len out of bound of slice"))?)
+        .get_mut(start..end)
+        .ok_or_else(|| anyhow!("indices out of bounds of slice"))?)
 }
 
 fn value_to_duration(value: Value) -> Result<Duration> {

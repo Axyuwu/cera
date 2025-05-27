@@ -1,6 +1,9 @@
 mod chain2;
 
-use crate::builtins::get_usize;
+use crate::builtins::{
+    builtin_values::{CMP_EQUAL, CMP_GREATER, CMP_LESS},
+    get_usize,
+};
 use anyhow::{ensure, Context as _, Result};
 use std::{
     cmp::Ordering,
@@ -8,7 +11,10 @@ use std::{
     sync::Arc,
 };
 
-use super::{get_args, Value};
+use super::{
+    builtin_values::{FALSE, TRUE},
+    get_args, Value,
+};
 
 /// A byte storage which inlines small amounts of data, and otherwise can be freely
 /// converted to an Arc
@@ -106,6 +112,7 @@ pub enum Arithmetic {
     And,
     Or,
     Xor,
+    Eq,
 }
 
 impl Arithmetic {
@@ -196,13 +203,10 @@ impl Arithmetic {
             Self::Cmp => {
                 use Ordering::*;
                 fn ord_to_val(ord: Ordering) -> Value {
-                    const LESS: Value = Value::bytes_const(&[0]);
-                    const EQUAL: Value = Value::bytes_const(&[1]);
-                    const GREATER: Value = Value::bytes_const(&[2]);
                     match ord {
-                        Less => LESS,
-                        Equal => EQUAL,
-                        Greater => GREATER,
+                        Less => CMP_LESS,
+                        Equal => CMP_EQUAL,
+                        Greater => CMP_GREATER,
                     }
                 }
 
@@ -263,6 +267,16 @@ impl Arithmetic {
                 .context("in arithmetic function or")?,
             Self::Xor => binary_bytewise(value, std::ops::BitXor::bitxor)
                 .context("in arithmetic function xor")?,
+            Self::Eq => {
+                let [lhs, rhs] = get_args(value)?.map(Value::into_bytes);
+                let args = [lhs?, rhs?];
+                let [lhs, rhs] = args.each_ref().map(|e| trim_zeros(e));
+
+                match lhs == rhs {
+                    true => TRUE,
+                    false => FALSE,
+                }
+            }
         })
     }
     pub fn from_ident(ident: &[u8]) -> Option<Self> {
@@ -280,6 +294,7 @@ impl Arithmetic {
             b"and" => Self::And,
             b"or" => Self::Or,
             b"xor" => Self::Xor,
+            b"eq" => Self::Eq,
             _ => return None,
         })
     }
@@ -288,14 +303,6 @@ impl Arithmetic {
 fn binary_bytewise(value: Value, func: impl Fn(u8, u8) -> u8) -> Result<Value> {
     let [lhs, rhs] = get_args(value)?.map(Value::into_bytes);
     let (mut lhs, rhs) = (lhs?, rhs?);
-    ensure!(
-        lhs.len() == rhs.len(),
-        "non equal length bytes for binary bytewise op:\nrhs ({}): {}\n lhs ({}): {}",
-        lhs.len(),
-        Value::Bytes(lhs),
-        rhs.len(),
-        Value::Bytes(rhs),
-    );
 
     let (mut out, const_side) = if let Some(_) = lhs.get_mut() {
         (lhs, rhs)
@@ -413,7 +420,7 @@ fn shr_mod8_iter<'t>(
         .map(mask)
 }
 
-fn trim_zeros(mut slice: &[u8]) -> &[u8] {
+pub(crate) fn trim_zeros(mut slice: &[u8]) -> &[u8] {
     while let [head @ .., 0] = slice {
         slice = head
     }
