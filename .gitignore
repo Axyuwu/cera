@@ -1,3 +1,6 @@
-/target
-/result
-/.direnv
+target
+result
+.direnv
+flamegraph.svg
+perf.data
+*.old
