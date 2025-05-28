@@ -566,7 +566,7 @@ fn world_map_io_no_arg(
 }
 
 fn val_to_offset_slice(value: &Value) -> Result<&[u8]> {
-    let aggr = value.as_aggregate()?;
+    let aggr = value.as_aggregate().context("in val_to_offset_slice")?;
     if aggr.len() != 3 {
         bail!(
             "expected 3 values, a start, an end, and a buffer, found {} values instead",

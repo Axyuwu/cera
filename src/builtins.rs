@@ -70,7 +70,7 @@ impl<T> SliceStorage<T> for Infallible {
     }
 
     fn try_new(_slice: &[T]) -> Option<Self> {
-        unreachable!()
+        None
     }
 
     fn eq(&self, _rhs: &[T]) -> bool {
@@ -196,7 +196,7 @@ impl Value {
     }
     pub fn bytes(slice: &'static (impl AsRef<[u8]> + ?Sized)) -> Self {
         let bytes = slice.as_ref();
-        if let Some(slice) = U8SliceStorage::try_new(bytes) {
+        if let Some(slice) = <u8 as HasSliceStorage>::Storage::try_new(bytes) {
             Self::Bytes(EvalSlice::Inline(slice))
         } else {
             Self::Bytes(EvalSlice::Borrowed(bytes))
@@ -204,14 +204,14 @@ impl Value {
     }
     pub fn bytes_cloned(slice: impl AsRef<[u8]>) -> Self {
         let bytes = slice.as_ref();
-        if let Some(slice) = U8SliceStorage::try_new(bytes) {
+        if let Some(slice) = <u8 as HasSliceStorage>::Storage::try_new(bytes) {
             Self::Bytes(EvalSlice::Inline(slice))
         } else {
             Self::Bytes(EvalSlice::Arc(bytes.into()))
         }
     }
     pub fn bytes_move(slice: impl Into<Arc<[u8]>> + AsRef<[u8]>) -> Self {
-        if let Some(slice) = U8SliceStorage::try_new(slice.as_ref()) {
+        if let Some(slice) = <u8 as HasSliceStorage>::Storage::try_new(slice.as_ref()) {
             Self::Bytes(EvalSlice::Inline(slice))
         } else {
             Self::Bytes(EvalSlice::Arc(slice.into()))
@@ -363,10 +363,11 @@ impl Display for Value {
 
 pub fn eval_builtin(atom: Atom) -> Result<Value> {
     let (world, world_handle) = World::new();
+    let atom = atom_to_val(atom);
     eval(
         Value::aggregate_move([
             Value::bytes("call"),
-            Value::aggregate_move([builtin_values::BUILTIN_EVAL_FUNC, atom_to_val(atom)]),
+            Value::aggregate_move([builtin_values::BUILTIN_EVAL_FUNC, atom]),
         ]),
         world,
     )
@@ -647,7 +648,12 @@ impl BuiltinFunc {
                 let [state, value] =
                     get_args(value).context("while parsing arg eval in let binding")?;
 
-                if idx + 1 == state.as_aggregate()?.len() {
+                if idx + 1
+                    == state
+                        .as_aggregate()
+                        .context("in Let::PendingArgEval")?
+                        .len()
+                {
                     // Breaks the loop, and we get tail call optimization for free!
                     Step {
                         func: Self::BuiltinEval,
@@ -675,7 +681,8 @@ impl BuiltinFunc {
                 {
                     let state = state.as_aggregate_mut()?.make_mut();
                     drops
-                        .as_aggregate()?
+                        .as_aggregate()
+                        .context("while processing drops for let")?
                         .iter()
                         .try_for_each(|drop| -> Result<_> {
                             let Some(out) = state.get_mut(get_usize(drop.as_bytes()?)?) else {
@@ -730,7 +737,11 @@ impl BuiltinFunc {
             Self::LetArgEval(LetArgEval::InitInner { state }) => match value {
                 Value::Bytes(idx) => {
                     let idx = get_usize(&idx)?;
-                    let Some(res) = state.as_aggregate()?.get(idx) else {
+                    let Some(res) = state
+                        .as_aggregate()
+                        .context("while evaluating args of let")?
+                        .get(idx)
+                    else {
                         bail!("index {idx} out of bound of state:\n{state}")
                     };
                     Done { value: res.clone() }
@@ -800,7 +811,8 @@ impl BuiltinFunc {
             }
             Self::BytesEq => Done {
                 value: {
-                    let [lhs, rhs] = get_args(value)?.map(Value::into_bytes);
+                    let [lhs, rhs] =
+                        get_args(value)?.map(|e| e.into_bytes().context("in bytes_eq"));
 
                     match *lhs? == *rhs? {
                         true => TRUE,
@@ -814,7 +826,9 @@ impl BuiltinFunc {
                     let [value, idx] =
                         get_args(value).context("while getting args for aggrget builtin")?;
                     let idx = get_usize(idx.as_bytes()?)?;
-                    let aggr = value.as_aggregate()?;
+                    let aggr = value
+                        .as_aggregate()
+                        .context("while getting args for aggrget builtin")?;
                     aggr.get(idx)
                         .ok_or_else(|| anyhow!("index {idx} out of bounds of aggregate:\n{value}"))?
                         .clone()
@@ -928,13 +942,12 @@ pub fn get_args<const SIZE: usize>(value: Value) -> Result<[Value; SIZE]> {
 }
 
 // Little endian
-
 pub fn get_usize(bytes: &[u8]) -> Result<usize> {
     bytes
         .iter()
         .rev()
         .try_fold(0usize, |acc, byte| {
-            acc.checked_mul(u8::MAX as usize)?
+            acc.checked_mul(u8::MAX as usize + 1)?
                 .checked_add(*byte as usize)
         })
         .ok_or_else(|| {
@@ -947,14 +960,7 @@ pub fn get_usize(bytes: &[u8]) -> Result<usize> {
 
 pub fn usize_to_val(usize: usize) -> Value {
     let bytes = usize.to_le_bytes();
-    let idx = bytes
-        .iter()
-        .enumerate()
-        .rev()
-        .find(|(_, v)| **v != 0)
-        .map(|(i, _)| i + 1)
-        .unwrap_or(0);
-    Value::bytes_cloned(&bytes[0..idx])
+    Value::bytes_cloned(trim_zeros(&bytes))
 }
 
 pub fn get_u128(bytes: &[u8]) -> Result<u128> {
@@ -962,7 +968,8 @@ pub fn get_u128(bytes: &[u8]) -> Result<u128> {
         .iter()
         .rev()
         .try_fold(0u128, |acc, byte| {
-            acc.checked_mul(u8::MAX as u128)?.checked_add(*byte as u128)
+            acc.checked_mul(u8::MAX as u128 + 1)?
+                .checked_add(*byte as u128)
         })
         .ok_or_else(|| {
             anyhow!(

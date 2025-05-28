@@ -1,4 +1,27 @@
-"builtin_eval" (
-    "identity" ("hai" "this is a test" "epic byte strings\xFF")
+builtin_eval (
+    call (
+        (
+            (
+                "\x03"
+                aggr_slice_new
+                aggr_slice_fold
+                ((
+                    "\x00"
+                    "\x01"
+                ) (
+                    (aggr_get ("\x03" "\x01"))
+                    (aggr_get ("\x03" "\x02"))
+                    (mul ("\x04" "\x05"))
+                ))
+            )
+            (
+                (builtin_import "\x02")
+                (builtin_import "\x03")
+                (call ("\x06" "\x05"))
+                (call ("\x07" ("\x08" "\x01" "\x04")))
+            )
+        )
+        ("\x70" "\xF3" "\x03\xB0")
+    )
 )
 

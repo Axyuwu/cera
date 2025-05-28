@@ -61,6 +61,7 @@ impl BuiltinImport {
             b"aggr_slice_is_empty" => AGGR_SLICE_IS_EMPTY,
             b"aggr_slice_map_fold" => AGGR_SLICE_MAP_FOLD,
             b"aggr_slice_map" => AGGR_SLICE_MAP,
+            b"aggr_slice_fold" => AGGR_SLICE_FOLD,
             b"aggr_vec_slice" => AGGR_VEC_SLICE,
             b"min" => MIN,
             b"max" => MAX,
@@ -105,7 +106,7 @@ pub const BUILTIN_EVAL_FUNC: Value = cera!(
 // 8: type
 // 9: value
 // 10: type == "aggregate"
-// if 10 (call (self, value))) else (identity value)
+// if 10 (call (AGGR_MAP (value self)))) else (identity value)
 #[rustfmt::skip]
 const ATOM_VALUE_TO_EVALUATABLE: Value = cera!(
     ([0] [1] {AGGR_MAP} aggregate call identity)
@@ -263,10 +264,10 @@ const AGGR_SLICE_TRY_GET: Value = cera!(
 // 5: (process_abort "index out of bound of slice")
 // 6: aggr_get
 // 7: arg
-// 8: res ("call" (SLICE_TRY_GET, arg))
-// 9: ret_value ("aggr_get" (res, 1))
-// 10: ret_value_variant ("aggr_get" (ret_value, 0))
-// 11: is_ret_value_some (bytes_eq ("some" ret_value_variant))
+// 8: res (call (SLICE_TRY_SET, arg))
+// 9: ret_value (aggr_get (res, 1))
+// 10: ret_value_variant (aggr_get (ret_value, 0))
+// 11: is_ret_value_some (bytes_eq (some ret_value_variant))
 // if (is_ret_value_some [5] ("aggr_get" (res, 0)))
 #[rustfmt::skip]
 const AGGR_SLICE_SET: Value = cera!(
@@ -424,14 +425,14 @@ const AGGR_SLICE_MAP_FOLD: Value = cera!(
 // 4: identity
 // 5: call
 // 6: PIPE
-// 7: AGGR_SLICE_MAP_FOLD_INNER
+// 7: AGGR_SLICE_MAP_FOLD_STEP
 // 8: arg
 // 9: slice (aggr_get (arg 0))
 // 10: acc (aggr_get (arg 1))
 // 11: is_empty (call (AGGR_SLICE_IS_EMPTY slice))
 // if (is_empty
 //      (identity (slice acc))
-//      (call (PIPE ((call (AGGR_SLICE_MAP_FOLD_INNER arg)) self)))
+//      (call (PIPE ((call (AGGR_SLICE_MAP_FOLD_STEP arg)) self)))
 // )
 #[rustfmt::skip]
 const AGGR_SLICE_MAP_FOLD_INNER: Value = cera!(
@@ -539,8 +540,82 @@ const AGGR_SLICE_MAP: Value = cera!(
     )
 );
 
+// (slice{T} acc{A} func{(A T) -> A}) -> A
+//
+// 0: self
+// 1: 0
+// 2: 1
+// 3: AGGR_SLICE_IS_EMPTY
+// 4: identity
+// 5: call
+// 6: PIPE
+// 7: AGGR_SLICE_FOLD_STEP
+// 8: arg
+// 9: slice (aggr_get (arg 0))
+// 10: acc (aggr_get (arg 1))
+// 11: is_empty (call (AGGR_SLICE_IS_EMPTY slice))
+// if (is_empty
+//      (identity acc)
+//      (call (PIPE ((call (AGGR_SLICE_FOLD_STEP arg)) self)))
+// )
 #[rustfmt::skip]
 const AGGR_SLICE_FOLD: Value = cera!(
+    (
+        [0]
+        [1]
+        {AGGR_SLICE_IS_EMPTY}
+        identity
+        call
+        {PIPE}
+        {AGGR_SLICE_FOLD_STEP}
+    )
+    (
+        (aggr_get ([8] [1]))
+        (aggr_get ([8] [2]))
+        (call ([3] [9]))
+        (if ([11]
+            ([4] [10])
+            ([5] ([6] (([5] ([7] [8])) [0])))
+        ))
+    )
+);
+
+// (slice{T} acc{A} func{(A T) -> A}) -> (slice{T#len-=1} acc{A} func{(A T) -> A})
+// 0: self
+// 1: 0
+// 2: 1
+// 3: 2
+// 4: AGGR_SLICE_GET
+// 5: arg
+// 6: slice (aggr_get (arg 0))
+// 7: acc (aggr_get (arg 1))
+// 8: func (aggr_get (arg 2))
+// 9: arg2 (aggr_set (arg 0 ()))
+// 10: arg3 (aggr_set (arg2 1 ()))
+// 11: elem (call (AGGR_SLICE_GET (slice 0)))
+// 12: acc2 (call (func (acc elem)))
+// 13: arg4 (aggr_set (arg3 1 acc2))
+// 14: start (aggr_get (slice 0))
+// 15: start2 (add (start 1))
+// 16: slice2 (aggr_set (slice 0 start2))
+// aggr_set (arg4 0 slice2)
+#[rustfmt::skip]
+const AGGR_SLICE_FOLD_STEP: Value = cera!(
+    ([0] [1] [2] {AGGR_SLICE_GET})
+    (
+        (aggr_get ([5] [1]))
+        (aggr_get ([5] [2]))
+        (aggr_get ([5] [3]))
+        (aggr_set ([5] [1] ()))
+        (aggr_set ([9] [2] ()))
+        (call ([4] ([6] [1])))
+        (call ([8] ([7] [11])))
+        (aggr_set ([10] [2] [12]))
+        (aggr_get ([6] [1]))
+        (add ([14] [2]))
+        (aggr_set ([6] [1] [15]))
+        (aggr_set ([13] [1] [16]))
+    )
 );
 
 pub const TRUE: Value = cera_expr!([1]);

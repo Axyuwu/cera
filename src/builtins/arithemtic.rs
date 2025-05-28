@@ -121,7 +121,8 @@ impl Arithmetic {
     pub fn poll(self, value: Value) -> Result<Value> {
         Ok(match self {
             Self::Add => {
-                let [lhs, rhs] = get_args(value)?.map(Value::into_bytes);
+                let [lhs, rhs] =
+                    get_args(value)?.map(|e| e.into_bytes().context("in arithmetic add"));
                 let args = [lhs?, rhs?];
                 let [lhs, rhs] = args.each_ref().map(|e| trim_zeros(e));
 
