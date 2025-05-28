@@ -10,6 +10,7 @@ use std::ops::ControlFlow;
 use std::ops::Deref;
 use std::sync::Arc;
 
+use ahash::HashMapExt;
 use arithemtic::trim_zeros;
 use arithemtic::Arithmetic;
 use builtin_values::BuiltinImport;
@@ -30,7 +31,7 @@ pub trait SliceStorage<T>: Sized {
 #[derive(Debug, Clone)]
 pub struct U8SliceStorage {
     len: u8,
-    storage: [u8; 22],
+    storage: [u8; 15],
 }
 
 impl SliceStorage<u8> for U8SliceStorage {
@@ -43,10 +44,10 @@ impl SliceStorage<u8> for U8SliceStorage {
     }
 
     fn try_new(slice: &[u8]) -> Option<Self> {
-        if slice.len() > 22 {
+        if slice.len() > 15 {
             None
         } else {
-            let mut storage = [0; 22];
+            let mut storage = [0; 15];
             storage[0..(slice.len())].copy_from_slice(slice);
             Some(Self {
                 len: slice.len() as u8,
@@ -88,7 +89,6 @@ impl HasSliceStorage for u8 {
     type Storage = U8SliceStorage;
 }
 
-#[repr(u8)]
 #[derive(Debug, Clone)]
 pub enum EvalSlice<T: 'static + HasSliceStorage> {
     Arc(Arc<[T]>),
@@ -135,6 +135,24 @@ impl<T: HasSliceStorage> EvalSlice<T> {
             (Self::Arc(lhs), Self::Arc(rhs)) => std::ptr::eq(&*lhs, &*rhs),
             _ => false,
         }
+    }
+    fn into_array<const SIZE: usize>(self) -> [T; SIZE]
+    where
+        T: Clone,
+    {
+        let s = &*self;
+        assert!(s.len() == SIZE);
+        match self {
+            Self::Arc(inner) => unsafe {
+                let slice: *const [T] = Arc::into_raw(inner);
+                let ptr: *const [T; SIZE] = std::mem::transmute((&*slice).as_ptr());
+                Arc::unwrap_or_clone(Arc::from_raw(ptr))
+            },
+            _ => TryInto::<&[T; SIZE]>::try_into(s).unwrap().clone(),
+        }
+    }
+    fn as_array<const SIZE: usize>(&self) -> &[T; SIZE] {
+        (&**self).try_into().unwrap()
     }
 }
 
@@ -507,31 +525,13 @@ enum BuiltinFunc {
 }
 
 impl BuiltinFunc {
-    fn name(&self) -> &'static str {
-        match self {
-            BuiltinFunc::BuiltinEval => "builtin_eval",
-            BuiltinFunc::Let(_) => "let",
-            BuiltinFunc::LetArgEval(_) => "let_arg_eval",
-            BuiltinFunc::Call => "call",
-            BuiltinFunc::If => "if",
-            BuiltinFunc::BytesEq => "bytes_eq",
-            BuiltinFunc::Identity => "identity",
-            BuiltinFunc::AggrGet => "aggr_get",
-            BuiltinFunc::AggrSet => "aggr_set",
-            BuiltinFunc::AggrLen => "aggr_len",
-            BuiltinFunc::AggrMake => "aggr_make",
-            BuiltinFunc::Arithmetic(_) => "arithmetic",
-            BuiltinFunc::WorldIo(_) => "worldio",
-            BuiltinFunc::BuiltinImport(_) => "builtin_import",
-        }
-    }
     #[inline]
     fn poll(self, value: Value, world: &mut World) -> FuncThunk {
         use FuncThunk::*;
         match self {
             Self::BuiltinEval => Self::poll_builtin_eval(value),
             Self::Let(let_eval) => let_eval.poll(value),
-            Self::LetArgEval(let_arg_eval) => let_arg_eval.poll(value),
+            Self::LetArgEval(let_arg_eval) => let_arg_eval.poll(),
             Self::Call => Self::poll_call(value),
             Self::If => Self::poll_if(value),
             Self::BytesEq => Self::poll_bytes_eq(value),
@@ -746,11 +746,8 @@ impl Let {
         FuncThunk::Pending {
             value: Value::unit(),
             pending_func: BuiltinFunc::Let(Let::PendingArgEval { idx }),
-            new_func: BuiltinFunc::LetArgEval(LetArgEval::Init {
-                state: {
-                    let tmp = Value::aggregate_move(state);
-                    tmp
-                },
+            new_func: BuiltinFunc::LetArgEval(LetArgEval {
+                state: Value::aggregate_move(state),
                 idx,
             }),
         }
@@ -773,7 +770,8 @@ impl Let {
     }
     fn poll_drops(idx: usize, arg: Value, value: Value) -> FuncThunk {
         let mut state = value;
-        let [_func, _args, drops] = get_args(state.as_aggregate().get(idx).unwrap().clone());
+        let [_func, _args, drops] = get_args_ref(&state.as_aggregate().get(idx).unwrap());
+        let drops = drops.clone();
 
         {
             let state = state.as_aggregate_mut().make_mut();
@@ -796,129 +794,66 @@ impl Let {
     }
     fn poll_pending_eval(mut state: Value, idx: usize, value: Value) -> FuncThunk {
         let state_mut = state.as_aggregate_mut().make_mut();
-        let Some(out) = state_mut.get_mut(idx) else {
-            panic!("index {idx} out of bound of state:\n{state}")
-        };
+        let out = state_mut.get_mut(idx).unwrap();
         *out = value;
         let idx = idx + 1;
         FuncThunk::Pending {
             value: Value::unit(),
             pending_func: BuiltinFunc::Let(Let::PendingArgEval { idx }),
-            new_func: BuiltinFunc::LetArgEval(LetArgEval::Init { state, idx }),
+            new_func: BuiltinFunc::LetArgEval(LetArgEval { state, idx }),
         }
     }
 }
 
 #[derive(Debug)]
-enum LetArgEval {
-    Init {
-        state: Value,
-        idx: usize,
-    },
-    InitInner {
-        state: Value,
-    },
-    Final {
-        state: Value,
-        func: Value,
-    },
-    Pending {
-        state: Value,
-        current: EvalSlice<Value>,
-        curr_idx: usize,
-    },
+struct LetArgEval {
+    state: Value,
+    idx: usize,
 }
 
 impl LetArgEval {
-    fn poll(self, value: Value) -> FuncThunk {
-        match self {
-            Self::Init { state, idx } => Self::poll_init(state, idx),
-            Self::InitInner { state } => Self::poll_init_inner(state, value),
-            Self::Final { state, func } => Self::poll_final(state, func, value),
-            Self::Pending {
-                state,
-                current,
-                curr_idx,
-            } => Self::poll_pending(state, current, curr_idx, value),
-        }
-    }
-    fn poll_init(mut state: Value, idx: usize) -> FuncThunk {
+    fn poll(self) -> FuncThunk {
+        let Self { mut state, idx } = self;
+
         let state_mut = state.as_aggregate_mut().make_mut();
-        let Some(step) = state_mut.get_mut(idx) else {
-            panic!("index {idx} out of bound of state:\n{state}")
-        };
+        let step = state_mut.get_mut(idx).unwrap();
 
         let [func, args, _drops] =
             TryInto::<&mut [Value; 3]>::try_into(step.as_aggregate_mut().make_mut()).unwrap();
 
-        FuncThunk::Pending {
-            value: std::mem::replace(args, Value::unit()),
-            pending_func: BuiltinFunc::LetArgEval(LetArgEval::Final {
-                func: func.clone(),
-                state: state.clone(),
-            }),
-            new_func: BuiltinFunc::LetArgEval(LetArgEval::InitInner { state }),
-        }
-    }
-    fn poll_init_inner(state: Value, value: Value) -> FuncThunk {
-        match value {
-            Value::Bytes(idx) => {
-                let idx = get_usize(&idx);
-                let res = state.as_aggregate().get(idx).unwrap();
-                FuncThunk::Done { value: res.clone() }
+        let mut args = std::mem::replace(args, Value::unit());
+        let func = func.clone();
+
+        fn arg_map(args: &mut Value, state: &[Value]) {
+            match args {
+                Value::Bytes(eval_slice) => {
+                    *args = state.get(get_usize(&*eval_slice)).unwrap().clone()
+                }
+                Value::Aggregate(eval_slice) => eval_slice
+                    .make_mut()
+                    .iter_mut()
+                    .for_each(|arg| arg_map(arg, state)),
             }
-            Value::Aggregate(aggr) if aggr.is_empty() => FuncThunk::Done {
-                value: Value::aggregate(&[]),
-            },
-            Value::Aggregate(aggr) => FuncThunk::Pending {
-                value: aggr.first().unwrap().clone(),
-                pending_func: BuiltinFunc::LetArgEval(LetArgEval::Pending {
-                    state: state.clone(),
-                    current: aggr,
-                    curr_idx: 0,
-                }),
-                new_func: BuiltinFunc::LetArgEval(LetArgEval::InitInner { state }),
-            },
         }
-    }
-    fn poll_final(state: Value, func: Value, value: Value) -> FuncThunk {
+
+        arg_map(&mut args, state_mut);
+
         FuncThunk::Done {
-            value: Value::aggregate_move([state, Value::aggregate_move([func, value])]),
-        }
-    }
-    fn poll_pending(
-        state: Value,
-        mut current: EvalSlice<Value>,
-        curr_idx: usize,
-        value: Value,
-    ) -> FuncThunk {
-        let current_mut = current.make_mut();
-        current_mut[curr_idx] = value;
-        let curr_idx = curr_idx + 1;
-        if let Some(next) = current_mut.get_mut(curr_idx) {
-            FuncThunk::Pending {
-                value: std::mem::replace(next, Value::unit()),
-                pending_func: BuiltinFunc::LetArgEval(LetArgEval::Pending {
-                    state: state.clone(),
-                    current,
-                    curr_idx,
-                }),
-                new_func: BuiltinFunc::LetArgEval(LetArgEval::InitInner { state }),
-            }
-        } else {
-            FuncThunk::Done {
-                value: Value::Aggregate(current),
-            }
+            value: Value::aggregate_move([state, Value::aggregate_move([func, args])]),
         }
     }
 }
 
 #[inline]
 pub fn get_args<const SIZE: usize>(value: Value) -> [Value; SIZE] {
+    let slice = value.into_aggregate();
+    slice.into_array()
+}
+
+#[inline]
+pub fn get_args_ref<const SIZE: usize>(value: &Value) -> &[Value; SIZE] {
     let slice = value.as_aggregate();
-    TryInto::<&[Value; SIZE]>::try_into(&**slice)
-        .unwrap()
-        .clone()
+    slice.as_array()
 }
 
 // Little endian
