@@ -1,4 +1,3 @@
-use anyhow::anyhow;
 use std::cell::Cell;
 use std::collections::BTreeMap;
 use std::fmt::Debug;
@@ -8,8 +7,6 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 
 use ahash::RandomState;
-use anyhow::Context as _;
-use anyhow::Result;
 use parking_lot::RwLock;
 
 use crate::builtins::Value;
@@ -41,17 +38,10 @@ impl<T> SyncMapInner<T> {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct SyncMapKey(u128);
 
-impl<'t> TryFrom<&'t Value> for SyncMapKey {
-    type Error = anyhow::Error;
-
-    fn try_from(value: &'t Value) -> std::result::Result<Self, Self::Error> {
-        (|| -> Result<_> {
-            let bytes = &**value.as_bytes()?;
-            Ok(Self(u128::from_le_bytes(bytes.try_into().with_context(
-                || anyhow!("expected 16 bytes, found {}", bytes.len()),
-            )?)))
-        })()
-        .context("while converting value to sync map key")
+impl<'t> From<&'t Value> for SyncMapKey {
+    fn from(value: &'t Value) -> Self {
+        let bytes = &**value.as_bytes();
+        Self(u128::from_le_bytes(bytes.try_into().unwrap()))
     }
 }
 

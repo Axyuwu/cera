@@ -4,7 +4,6 @@ use crate::builtins::{
     builtin_values::{CMP_EQUAL, CMP_GREATER, CMP_LESS},
     get_usize,
 };
-use anyhow::{ensure, Context as _, Result};
 use std::{
     cmp::Ordering,
     ops::{Deref, DerefMut},
@@ -118,13 +117,11 @@ pub enum Arithmetic {
 impl Arithmetic {
     /// Operations may give results with trailing zeros, to limit allocations when possible, by
     /// always allocating a computed upper bound of the size
-    pub fn poll(self, value: Value) -> Result<FuncThunk> {
-        Ok(FuncThunk::Done {
+    pub fn poll(self, value: Value) -> FuncThunk {
+        FuncThunk::Done {
             value: match self {
                 Self::Add => {
-                    let [lhs, rhs] =
-                        get_args(value)?.map(|e| e.into_bytes().context("in arithmetic add"));
-                    let args = [lhs?, rhs?];
+                    let args = get_args(value).map(Value::into_bytes);
                     let [lhs, rhs] = args.each_ref().map(|e| trim_zeros(e));
 
                     let mut res = ByteStorage::new(std::cmp::max(lhs.len(), rhs.len()) + 1);
@@ -145,8 +142,7 @@ impl Arithmetic {
                     Value::bytes_move(res)
                 }
                 Self::Sub => {
-                    let [lhs, rhs] = get_args(value)?.map(Value::into_bytes);
-                    let args = [lhs?, rhs?];
+                    let args = get_args(value).map(Value::into_bytes);
                     let [lhs, rhs] = args.each_ref().map(|e| trim_zeros(e));
 
                     let mut res = ByteStorage::new(lhs.len());
@@ -165,7 +161,7 @@ impl Arithmetic {
                             c1 || c2
                         });
 
-                    ensure!(
+                    assert!(
                         !carry,
                         "sub underflowed, left argument was less than right one"
                     );
@@ -173,8 +169,7 @@ impl Arithmetic {
                     Value::bytes_move(res)
                 }
                 Self::Mul => {
-                    let [lhs, rhs] = get_args(value)?.map(Value::into_bytes);
-                    let args = [lhs?, rhs?];
+                    let args = get_args(value).map(Value::into_bytes);
                     let [lhs, rhs] = args.each_ref().map(|e| trim_zeros(e));
 
                     let mut res = ByteStorage::new(lhs.len() + rhs.len());
@@ -197,10 +192,10 @@ impl Arithmetic {
 
                     Value::bytes_move(res)
                 }
-                Self::Div => Value::bytes_move(div_full(value)?.0),
-                Self::Rem => Value::bytes_move(div_full(value)?.1),
+                Self::Div => Value::bytes_move(div_full(value).0),
+                Self::Rem => Value::bytes_move(div_full(value).1),
                 Self::DivFull => Value::aggregate_move(
-                    Into::<[ByteStorage; 2]>::into(div_full(value)?).map(Value::bytes_move),
+                    Into::<[ByteStorage; 2]>::into(div_full(value)).map(Value::bytes_move),
                 ),
                 Self::Cmp => {
                     use Ordering::*;
@@ -212,18 +207,18 @@ impl Arithmetic {
                         }
                     }
 
-                    let [lhs, rhs] = get_args(value)?.map(Value::into_bytes);
-                    let args = [lhs?, rhs?];
+                    let args = get_args(value).map(|e| e.into_bytes());
                     let [lhs, rhs] = args.each_ref().map(|e| trim_zeros(e));
+
                     match lhs.len().cmp(&rhs.len()) {
                         Equal => ord_to_val(lhs.iter().rev().cmp(rhs.iter().rev())),
                         o => ord_to_val(o),
                     }
                 }
                 Self::Shl => {
-                    let [lhs, rhs] = get_args(value)?;
-                    let offset = get_usize(rhs.as_bytes()?)?;
-                    let lhs = trim_zeros(lhs.as_bytes()?);
+                    let [lhs, rhs] = get_args(value);
+                    let offset = get_usize(rhs.as_bytes());
+                    let lhs = trim_zeros(lhs.as_bytes());
 
                     let (bits, bytes) = (offset % 8, offset / 8);
 
@@ -237,9 +232,9 @@ impl Arithmetic {
                     Value::bytes_move(res)
                 }
                 Self::Shr => {
-                    let [lhs, rhs] = get_args(value)?;
-                    let offset = get_usize(rhs.as_bytes()?)?;
-                    let lhs = trim_zeros(lhs.as_bytes()?);
+                    let [lhs, rhs] = get_args(value);
+                    let offset = get_usize(rhs.as_bytes());
+                    let lhs = trim_zeros(lhs.as_bytes());
 
                     let (bits, bytes) = (offset % 8, offset / 8);
 
@@ -257,21 +252,17 @@ impl Arithmetic {
                 Self::Not => {
                     let mut bytes = value;
                     bytes
-                        .as_bytes_mut()?
+                        .as_bytes_mut()
                         .make_mut()
                         .iter_mut()
                         .for_each(|b| *b = !*b);
                     bytes
                 }
-                Self::And => binary_bytewise(value, std::ops::BitAnd::bitand)
-                    .context("in arithmetic function and")?,
-                Self::Or => binary_bytewise(value, std::ops::BitOr::bitor)
-                    .context("in arithmetic function or")?,
-                Self::Xor => binary_bytewise(value, std::ops::BitXor::bitxor)
-                    .context("in arithmetic function xor")?,
+                Self::And => binary_bytewise(value, std::ops::BitAnd::bitand),
+                Self::Or => binary_bytewise(value, std::ops::BitOr::bitor),
+                Self::Xor => binary_bytewise(value, std::ops::BitXor::bitxor),
                 Self::Eq => {
-                    let [lhs, rhs] = get_args(value)?.map(Value::into_bytes);
-                    let args = [lhs?, rhs?];
+                    let args = get_args(value).map(Value::into_bytes);
                     let [lhs, rhs] = args.each_ref().map(|e| trim_zeros(e));
 
                     match lhs == rhs {
@@ -280,7 +271,7 @@ impl Arithmetic {
                     }
                 }
             },
-        })
+        }
     }
     pub fn from_ident(ident: &[u8]) -> Option<Self> {
         Some(match ident {
@@ -303,9 +294,8 @@ impl Arithmetic {
     }
 }
 
-fn binary_bytewise(value: Value, func: impl Fn(u8, u8) -> u8) -> Result<Value> {
-    let [lhs, rhs] = get_args(value)?.map(Value::into_bytes);
-    let (mut lhs, rhs) = (lhs?, rhs?);
+fn binary_bytewise(value: Value, func: impl Fn(u8, u8) -> u8) -> Value {
+    let [mut lhs, rhs] = get_args(value).map(Value::into_bytes);
 
     let (mut out, const_side) = if let Some(_) = lhs.get_mut() {
         (lhs, rhs)
@@ -316,19 +306,18 @@ fn binary_bytewise(value: Value, func: impl Fn(u8, u8) -> u8) -> Result<Value> {
         .iter_mut()
         .zip(&*const_side)
         .for_each(|(lhs, rhs)| *lhs = func(*lhs, *rhs));
-    Ok(Value::Bytes(out))
+    Value::Bytes(out)
 }
 
 // (Quotient, Remainder)
-fn div_full(value: Value) -> Result<(ByteStorage, ByteStorage)> {
-    let [lhs, rhs] = get_args(value)?.map(Value::into_bytes);
-    let args = [lhs?, rhs?];
-    let [dividend, divisor] = args.each_ref().map(|e| trim_zeros(e));
+fn div_full(value: Value) -> (ByteStorage, ByteStorage) {
+    let args = get_args(value).map(Value::into_bytes);
+    let [dividend, divisor] = args.each_ref();
 
-    ensure!(divisor.len() != 0, "div by zero, right argument was zero");
+    assert!(divisor.len() != 0, "div by zero, right argument was zero");
 
     if dividend.len() < divisor.len() {
-        return Ok((ByteStorage::new(0), ByteStorage::new(0)));
+        return (ByteStorage::new(0), ByteStorage::new(0));
     }
 
     let mut quo = ByteStorage::new(dividend.len() - divisor.len() + 1);
@@ -349,7 +338,7 @@ fn div_full(value: Value) -> Result<(ByteStorage, ByteStorage)> {
         }
     });
 
-    Ok((quo, rem))
+    (quo, rem)
 }
 
 fn div_partial(rem: &mut [u8], divisor: &[u8]) -> u8 {

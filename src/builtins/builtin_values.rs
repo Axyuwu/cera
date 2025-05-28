@@ -1,6 +1,3 @@
-use anyhow::bail;
-use anyhow::Result;
-
 use super::FuncThunk;
 use super::Value;
 
@@ -41,9 +38,9 @@ macro_rules! cera_expr {
 pub struct BuiltinImport;
 
 impl BuiltinImport {
-    pub(super) fn poll(self, value: Value) -> Result<FuncThunk> {
-        Ok(FuncThunk::Done {
-            value: match &**value.as_bytes()? {
+    pub(super) fn poll(self, value: Value) -> FuncThunk {
+        FuncThunk::Done {
+            value: match &**value.as_bytes() {
                 b"builtin_eval_func" => BUILTIN_EVAL_FUNC,
                 b"aggr_map" => AGGR_MAP,
                 b"aggr_slice_get" => AGGR_SLICE_GET,
@@ -72,9 +69,9 @@ impl BuiltinImport {
                 b"cmp_less" => CMP_LESS,
                 b"cmp_equal" => CMP_EQUAL,
                 b"cmp_greater" => CMP_GREATER,
-                _ => bail!("invalid builtin_import argument: {value}"),
+                _ => panic!("invalid builtin_import argument: {value}"),
             },
-        })
+        }
     }
     pub fn from_ident(ident: &[u8]) -> Option<Self> {
         match ident {

@@ -9,5 +9,4 @@ debug = true
 
 [dependencies]
 ahash = "0.8.12"
-anyhow = "1.0.98"
 parking_lot = "0.12.3"

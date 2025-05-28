@@ -1,4 +1,3 @@
-use anyhow::anyhow;
 use std::{
     fs::File,
     io::{Read, Stderr, Stdin, Stdout, Write},
@@ -7,14 +6,10 @@ use std::{
     thread::JoinHandle,
 };
 
-use anyhow::{bail, Result};
-
 use crate::{
     builtins::{usize_to_val, Value},
-    utils::sync::{spinmutex::SpinMutex, sync_map::SyncMapKey},
+    utils::sync::spinmutex::SpinMutex,
 };
-
-use super::World;
 
 #[derive(Debug)]
 pub enum Io {
@@ -37,7 +32,7 @@ pub enum Io {
 // eval thread
 #[derive(Debug)]
 pub struct Thread {
-    join_handle: SpinMutex<Option<JoinHandle<Result<Value>>>>,
+    join_handle: SpinMutex<Option<JoinHandle<Value>>>,
     thread: std::thread::Thread,
 }
 
@@ -48,7 +43,7 @@ impl Thread {
             thread: std::thread::current(),
         }
     }
-    pub fn new(handle: JoinHandle<Result<Value>>) -> Self {
+    pub fn new(handle: JoinHandle<Value>) -> Self {
         Self {
             thread: handle.thread().clone(),
             join_handle: SpinMutex::new(Some(handle)),
@@ -115,7 +110,7 @@ impl Io {
             Io::AtomicCell(_) => "atomic cell",
         }
     }
-    pub fn read(&self, buf: &mut [u8]) -> Result<Value> {
+    pub fn read(&self, buf: &mut [u8]) -> Value {
         fn read<T: Read>(mut val: T, buf: &mut [u8]) -> std::io::Result<usize> {
             val.read(buf)
         }
@@ -125,7 +120,9 @@ impl Io {
             Io::ChildStdout(child_stdout) => {
                 let stdout = child_stdout.apply(Option::take);
                 let Some(mut stdout) = stdout else {
-                    bail!("attempted to use child stdout while already in use from another thread");
+                    panic!(
+                        "attempted to use child stdout while already in use from another thread"
+                    );
                 };
                 let res = read(&mut stdout, buf);
                 child_stdout.apply(|dst| *dst = Some(stdout));
@@ -134,18 +131,20 @@ impl Io {
             Io::ChildStderr(child_stderr) => {
                 let stderr = child_stderr.apply(Option::take);
                 let Some(mut stderr) = stderr else {
-                    bail!("attempted to use child stderr while already in use from another thread");
+                    panic!(
+                        "attempted to use child stderr while already in use from another thread"
+                    );
                 };
                 let res = read(&mut stderr, buf);
                 child_stderr.apply(|dst| *dst = Some(stderr));
                 res
             }
             Io::TcpStream(tcp_stream) => read(tcp_stream, buf),
-            o => bail!("attempted to read {}", o.name()),
+            o => panic!("attempted to read {}", o.name()),
         };
-        Ok(Value::from_res(res, usize_to_val, io_err_to_val))
+        Value::from_res(res, usize_to_val, io_err_to_val)
     }
-    pub fn write(&self, buf: &[u8]) -> Result<Value> {
+    pub fn write(&self, buf: &[u8]) -> Value {
         fn write<T: Write>(mut val: T, buf: &[u8]) -> std::io::Result<usize> {
             val.write(buf)
         }
@@ -155,11 +154,11 @@ impl Io {
             Io::Stderr(stderr) => write(stderr, buf),
             Io::ChildStdin(child_stdin) => write(child_stdin, buf),
             Io::TcpStream(tcp_stream) => write(tcp_stream, buf),
-            o => bail!("attempted to write {}", o.name()),
+            o => panic!("attempted to write {}", o.name()),
         };
-        Ok(Value::from_res(res, usize_to_val, io_err_to_val))
+        Value::from_res(res, usize_to_val, io_err_to_val)
     }
-    pub fn flush(&self) -> Result<Value> {
+    pub fn flush(&self) -> Value {
         fn flush<T: Write>(mut val: T) -> std::io::Result<()> {
             val.flush()
         }
@@ -169,52 +168,53 @@ impl Io {
             Io::Stderr(stderr) => flush(stderr),
             Io::ChildStdin(child_stdin) => flush(child_stdin),
             Io::TcpStream(tcp_stream) => flush(tcp_stream),
-            o => bail!("attempted to flush {}", o.name()),
+            o => panic!("attempted to flush {}", o.name()),
         };
-        Ok(Value::from_res(res, |()| Value::unit(), io_err_to_val))
+        Value::from_res(res, |()| Value::unit(), io_err_to_val)
     }
-    pub fn thread_join(&self) -> Result<Value> {
+    pub fn thread_join(&self) -> Value {
         match self {
             Io::Thread(Thread { join_handle, .. }) => join_handle
                 .apply(Option::take)
-                .ok_or_else(|| anyhow!("attempting to join already moved handle"))?
+                .unwrap()
                 .join()
-                .map_err(std::panic::resume_unwind)?,
-            o => bail!("attempted to thread_join {}", o.name()),
+                .map_err(std::panic::resume_unwind)
+                .unwrap(),
+            o => panic!("attempted to thread_join {}", o.name()),
         }
     }
-    pub fn thread_is_finished(&self) -> Result<bool> {
+    pub fn thread_is_finished(&self) -> bool {
         match self {
-            Io::Thread(Thread { join_handle, .. }) => Ok(join_handle.apply(|join_handle| {
+            Io::Thread(Thread { join_handle, .. }) => join_handle.apply(|join_handle| {
                 join_handle
                     .as_ref()
                     .map(JoinHandle::is_finished)
                     .unwrap_or(false)
-            })),
-            o => bail!("attempted to thread_is_finished {}", o.name()),
+            }),
+            o => panic!("attempted to thread_is_finished {}", o.name()),
         }
     }
-    pub fn thread_unpark(&self) -> Result<()> {
+    pub fn thread_unpark(&self) {
         match self {
-            Io::Thread(Thread { thread, .. }) => Ok(thread.unpark()),
-            o => bail!("attempted to thread_is_finished {}", o.name()),
+            Io::Thread(Thread { thread, .. }) => thread.unpark(),
+            o => panic!("attempted to thread_is_finished {}", o.name()),
         }
     }
-    pub fn cell_clone(&self) -> Result<Value> {
+    pub fn cell_clone(&self) -> Value {
         match self {
-            Io::AtomicCell(spin_mutex) => spin_mutex.apply(|e| Ok(e.clone())),
-            o => bail!("attempted to cell_clone {}", o.name()),
+            Io::AtomicCell(spin_mutex) => spin_mutex.apply(|e| e.clone()),
+            o => panic!("attempted to cell_clone {}", o.name()),
         }
     }
-    pub fn cell_swap(&self, new: Value) -> Result<Value> {
+    pub fn cell_swap(&self, new: Value) -> Value {
         match self {
-            Io::AtomicCell(spin_mutex) => spin_mutex.apply(|dst| Ok(std::mem::replace(dst, new))),
-            o => bail!("attempted to cell_swap {}", o.name()),
+            Io::AtomicCell(spin_mutex) => spin_mutex.apply(|dst| std::mem::replace(dst, new)),
+            o => panic!("attempted to cell_swap {}", o.name()),
         }
     }
     /// Only superficial equality check, checks whether the value points to the same address for
     /// borrowed types, or if it is equal for inline storage
-    pub fn cell_cas(&self, expected: Value, new: Value) -> Result<Value> {
+    pub fn cell_cas(&self, expected: Value, new: Value) -> Value {
         let res = match self {
             Io::AtomicCell(mutex) => mutex.apply(|value| {
                 if !value.addr_eq(&expected) {
@@ -224,12 +224,8 @@ impl Io {
                     Ok(())
                 }
             }),
-            o => bail!("attempted to cell_cas {}", o.name()),
+            o => panic!("attempted to cell_cas {}", o.name()),
         };
-        Ok(Value::from_res(
-            res,
-            |()| Value::unit(),
-            std::convert::identity,
-        ))
+        Value::from_res(res, |()| Value::unit(), std::convert::identity)
     }
 }

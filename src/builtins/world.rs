@@ -1,13 +1,8 @@
-use anyhow::anyhow;
-use anyhow::bail;
-use anyhow::Context as _;
 mod resources;
 
 use std::cell::Cell;
 use std::sync::Arc;
 use std::time::Duration;
-
-use anyhow::Result;
 
 use resources::{Io, Thread};
 
@@ -30,17 +25,10 @@ pub struct World {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct WorldGeneration(u128);
 
-impl<'t> TryFrom<&'t Value> for WorldGeneration {
-    type Error = anyhow::Error;
-
-    fn try_from(value: &'t Value) -> Result<Self, Self::Error> {
-        (|| -> Result<Self> {
-            let bytes = &**value.as_bytes()?;
-            Ok(Self(u128::from_le_bytes(bytes.try_into().with_context(
-                || anyhow!("expected 16 bytes, found {}", bytes.len()),
-            )?)))
-        })()
-        .context("while converting value to world generation")
+impl<'t> From<&'t Value> for WorldGeneration {
+    fn from(value: &'t Value) -> Self {
+        let bytes = &**value.as_bytes();
+        Self(u128::from_le_bytes(bytes.try_into().unwrap()))
     }
 }
 impl From<WorldGeneration> for Value {
@@ -61,7 +49,7 @@ impl World {
         let gen = res.generation.get();
         (res, gen.into())
     }
-    fn new_thread(&self, func: impl FnOnce(Self) -> Result<Value> + Send + 'static) -> SyncMapKey {
+    fn new_thread(&self, func: impl FnOnce(Self) -> Value + Send + 'static) -> SyncMapKey {
         let io_resources = self.io_resources.clone();
         let (key, cb) = self.io_resources.reserve();
 
@@ -307,314 +295,256 @@ impl WorldIo {
             Self::HintSpinLoop => "hint_spin_loop",
         }
     }
-    pub fn poll(self, value: Value, world: &mut World) -> Result<FuncThunk> {
-        match self {
-            WorldIo::IoRead => world_map_io(world, &self, value, |io, mut value| {
-                let res = io.read(val_to_offset_slice_mut(&mut value)?)?;
-                Ok(Value::aggregate_move([value, res]))
-            }),
-            WorldIo::IoReadVectored => todo!(),
-            WorldIo::IoWrite => world_map_io(world, &self, value, |io, value| {
-                io.write(val_to_offset_slice(&value)?)
-            }),
-            WorldIo::IoWriteVectored => todo!(),
-            WorldIo::IoFlush => world_map_io_no_arg(world, &self, value, Io::flush),
-            WorldIo::IoDrop => world_map_unit(world, &self, value, |value| {
-                if world.io_resources.remove((&value).try_into()?).is_none() {
-                    bail!("dropped non existant io resource {value}")
-                }
-                Ok(())
-            }),
-            WorldIo::IoStdin => todo!(),
-            WorldIo::IoStdout => todo!(),
-            WorldIo::IoStdErr => todo!(),
-            WorldIo::IoIsTerminal => todo!(),
-            WorldIo::ProcessChildSpawn => todo!(),
-            WorldIo::ProcessChildKill => todo!(),
-            WorldIo::ProcessChildId => todo!(),
-            WorldIo::ProcessChildWait => todo!(),
-            WorldIo::ProcessChildHasExited => todo!(),
-            WorldIo::ProcessAbort => bail!("program aborted:\n{value}"),
-            WorldIo::ProcessExit => todo!(),
-            WorldIo::ProcessId => todo!(),
-            WorldIo::FsFileOpen => todo!(),
-            WorldIo::FsFileUpdate => todo!(),
-            WorldIo::FsFileSync => todo!(),
-            WorldIo::FsDirLs => todo!(),
-            WorldIo::FsCreate => todo!(),
-            WorldIo::FsInfo => todo!(),
-            WorldIo::FsUpdate => todo!(),
-            WorldIo::FsRemove => todo!(),
-            WorldIo::NetTakeError => todo!(),
-            WorldIo::NetTryClone => todo!(),
-            WorldIo::NetInfo => todo!(),
-            WorldIo::NetUpdate => todo!(),
-            WorldIo::NetTcpListenerBind => todo!(),
-            WorldIo::NetTcpListenerAccept => todo!(),
-            WorldIo::NetTcpStreamConnect => todo!(),
-            WorldIo::NetTcpStreamPeek => todo!(),
-            WorldIo::NetUdpBind => todo!(),
-            WorldIo::NetUdpConnect => todo!(),
-            WorldIo::NetUdpRecv => todo!(),
-            WorldIo::NetUdpRecvFrom => todo!(),
-            WorldIo::NetUdpSend => todo!(),
-            WorldIo::NetUdpSendTo => todo!(),
-            WorldIo::NetUdpPeek => todo!(),
-            WorldIo::NetUdpPeekFrom => todo!(),
-            WorldIo::ThreadAvailableParallelism => todo!(),
-            WorldIo::ThreadCurrent => world_map_no_arg(&world, &self, value, || {
-                if world.io_resources.get(world.curr_thread.get()).is_none() {
-                    world.curr_thread.set(
-                        world
-                            .io_resources
-                            .insert(Arc::new(Io::Thread(Thread::current()))),
-                    );
-                }
-                Ok(world.curr_thread.get().into())
-            }),
-            WorldIo::ThreadPark => world_map_unit(world, &self, value, |value| {
-                Ok(if value.is_unit() {
-                    std::thread::park()
-                } else {
-                    std::thread::park_timeout(value_to_duration(value)?)
-                })
-            }),
-            WorldIo::ThreadSleep => todo!(),
-            WorldIo::ThreadSpawn => world_map(world, &self, value, |value| {
-                Ok(world.new_thread(|world| eval(value, world)).into())
-            }),
-            WorldIo::ThreadYieldNow => todo!(),
-            WorldIo::ThreadJoin => world_map_io_no_arg(world, &self, value, Io::thread_join),
-            WorldIo::ThreadIsFinished => todo!(),
-            WorldIo::ThreadUnpark => todo!(),
-            WorldIo::CellNew => todo!(),
-            WorldIo::CellClone => world_map_io_no_arg(world, &self, value, Io::cell_clone),
-            WorldIo::CellSwap => world_map_io(world, &self, value, Io::cell_swap),
-            WorldIo::CellCas => world_map_io(world, &self, value, |io, value| {
-                let [expected, new] = get_args(value)?;
-                io.cell_cas(expected, new)
-            }),
-            WorldIo::TimeInstantNow => todo!(),
-            WorldIo::EnvArgs => todo!(),
-            WorldIo::EnvVars => todo!(),
-            WorldIo::EnvCurrentDir => todo!(),
-            WorldIo::EnvConstants => todo!(),
-            WorldIo::HintSpinLoop => todo!(),
+    pub fn poll(self, value: Value, world: &mut World) -> FuncThunk {
+        FuncThunk::Done {
+            value: match self {
+                WorldIo::IoRead => world_map_io(world, value, |io, mut value| {
+                    let res = io.read(val_to_offset_slice_mut(&mut value));
+                    Value::aggregate_move([value, res])
+                }),
+                WorldIo::IoReadVectored => todo!(),
+                WorldIo::IoWrite => world_map_io(world, value, |io, value| {
+                    io.write(val_to_offset_slice(&value))
+                }),
+                WorldIo::IoWriteVectored => todo!(),
+                WorldIo::IoFlush => world_map_io_no_arg(world, value, Io::flush),
+                WorldIo::IoDrop => world_map_unit(world, value, |value| {
+                    if world
+                        .io_resources
+                        .remove((&value).try_into().unwrap())
+                        .is_none()
+                    {
+                        panic!("dropped non existant io resource {value}")
+                    }
+                }),
+                WorldIo::IoStdin => todo!(),
+                WorldIo::IoStdout => todo!(),
+                WorldIo::IoStdErr => todo!(),
+                WorldIo::IoIsTerminal => todo!(),
+                WorldIo::ProcessChildSpawn => todo!(),
+                WorldIo::ProcessChildKill => todo!(),
+                WorldIo::ProcessChildId => todo!(),
+                WorldIo::ProcessChildWait => todo!(),
+                WorldIo::ProcessChildHasExited => todo!(),
+                WorldIo::ProcessAbort => panic!("program aborted:\n{value}"),
+                WorldIo::ProcessExit => todo!(),
+                WorldIo::ProcessId => todo!(),
+                WorldIo::FsFileOpen => todo!(),
+                WorldIo::FsFileUpdate => todo!(),
+                WorldIo::FsFileSync => todo!(),
+                WorldIo::FsDirLs => todo!(),
+                WorldIo::FsCreate => todo!(),
+                WorldIo::FsInfo => todo!(),
+                WorldIo::FsUpdate => todo!(),
+                WorldIo::FsRemove => todo!(),
+                WorldIo::NetTakeError => todo!(),
+                WorldIo::NetTryClone => todo!(),
+                WorldIo::NetInfo => todo!(),
+                WorldIo::NetUpdate => todo!(),
+                WorldIo::NetTcpListenerBind => todo!(),
+                WorldIo::NetTcpListenerAccept => todo!(),
+                WorldIo::NetTcpStreamConnect => todo!(),
+                WorldIo::NetTcpStreamPeek => todo!(),
+                WorldIo::NetUdpBind => todo!(),
+                WorldIo::NetUdpConnect => todo!(),
+                WorldIo::NetUdpRecv => todo!(),
+                WorldIo::NetUdpRecvFrom => todo!(),
+                WorldIo::NetUdpSend => todo!(),
+                WorldIo::NetUdpSendTo => todo!(),
+                WorldIo::NetUdpPeek => todo!(),
+                WorldIo::NetUdpPeekFrom => todo!(),
+                WorldIo::ThreadAvailableParallelism => todo!(),
+                WorldIo::ThreadCurrent => world_map_no_arg(&world, value, || {
+                    if world.io_resources.get(world.curr_thread.get()).is_none() {
+                        world.curr_thread.set(
+                            world
+                                .io_resources
+                                .insert(Arc::new(Io::Thread(Thread::current()))),
+                        );
+                    }
+                    world.curr_thread.get().into()
+                }),
+                WorldIo::ThreadPark => world_map_unit(world, value, |value| {
+                    if value.is_unit() {
+                        std::thread::park()
+                    } else {
+                        std::thread::park_timeout(value_to_duration(value))
+                    }
+                }),
+                WorldIo::ThreadSleep => todo!(),
+                WorldIo::ThreadSpawn => world_map(world, value, |value| {
+                    world.new_thread(|world| eval(value, world)).into()
+                }),
+                WorldIo::ThreadYieldNow => todo!(),
+                WorldIo::ThreadJoin => world_map_io_no_arg(world, value, Io::thread_join),
+                WorldIo::ThreadIsFinished => todo!(),
+                WorldIo::ThreadUnpark => todo!(),
+                WorldIo::CellNew => todo!(),
+                WorldIo::CellClone => world_map_io_no_arg(world, value, Io::cell_clone),
+                WorldIo::CellSwap => world_map_io(world, value, Io::cell_swap),
+                WorldIo::CellCas => world_map_io(world, value, |io, value| {
+                    let [expected, new] = get_args(value);
+                    io.cell_cas(expected, new)
+                }),
+                WorldIo::TimeInstantNow => todo!(),
+                WorldIo::EnvArgs => todo!(),
+                WorldIo::EnvVars => todo!(),
+                WorldIo::EnvCurrentDir => todo!(),
+                WorldIo::EnvConstants => todo!(),
+                WorldIo::HintSpinLoop => todo!(),
+            },
         }
-        .map(|value| FuncThunk::Done { value })
     }
 }
 
-fn world_map_unit(
-    world: &World,
-    instr: &WorldIo,
-    value: Value,
-    func: impl FnOnce(Value) -> Result<()>,
-) -> Result<Value> {
-    (|| -> Result<_> {
-        let (gen, value) = (|| -> Result<_> {
-            let [gen, rem] = get_args(value)?;
-            let gen = WorldGeneration::try_from(&gen)?;
-            Ok((gen, rem))
-        })()
-        .context("while evaluating initial args for world_map_io")?;
+fn world_map_unit(world: &World, value: Value, func: impl FnOnce(Value)) -> Value {
+    let (gen, value) = {
+        let [gen, rem] = get_args(value);
+        let gen = WorldGeneration::from(&gen);
+        (gen, rem)
+    };
 
-        let mut world_gen = world.generation.get();
+    let mut world_gen = world.generation.get();
 
-        if gen != world_gen {
-            bail!(
-                "mismatched world generation, given: {:?},\n current: {:?}",
-                gen,
-                world_gen
-            )
-        }
+    if gen != world_gen {
+        panic!(
+            "mismatched world generation, given: {:?},\n current: {:?}",
+            gen, world_gen
+        )
+    }
 
-        world_gen.0 += 1;
-        world.generation.set(world_gen);
+    world_gen.0 += 1;
+    world.generation.set(world_gen);
 
-        func(value).map(|()| world_gen.into())
-    })()
-    .with_context(|| anyhow!("while evaluating builtin {}", instr.name()))
+    func(value);
+
+    world_gen.into()
 }
-fn world_map(
-    world: &World,
-    instr: &WorldIo,
-    value: Value,
-    func: impl FnOnce(Value) -> Result<Value>,
-) -> Result<Value> {
-    (|| -> Result<_> {
-        let (gen, value) = (|| -> Result<_> {
-            let [gen, rem] = get_args(value)?;
-            let gen = WorldGeneration::try_from(&gen)?;
-            Ok((gen, rem))
-        })()
-        .context("while evaluating initial args for world_map_io")?;
+fn world_map(world: &World, value: Value, func: impl FnOnce(Value) -> Value) -> Value {
+    let (gen, value) = {
+        let [gen, rem] = get_args(value);
+        let gen = WorldGeneration::from(&gen);
+        (gen, rem)
+    };
 
-        let mut world_gen = world.generation.get();
+    let mut world_gen = world.generation.get();
 
-        if gen != world_gen {
-            bail!(
-                "mismatched world generation, given: {:?},\n current: {:?}",
-                gen,
-                world_gen
-            )
-        }
+    if gen != world_gen {
+        panic!(
+            "mismatched world generation, given: {:?},\n current: {:?}",
+            gen, world_gen
+        )
+    }
 
-        world_gen.0 += 1;
-        world.generation.set(world_gen);
+    world_gen.0 += 1;
+    world.generation.set(world_gen);
 
-        func(value).map(|val| Value::aggregate_move([world_gen.into(), val]))
-    })()
-    .with_context(|| anyhow!("while evaluating builtin {}", instr.name()))
+    Value::aggregate_move([world_gen.into(), func(value)])
 }
-fn world_map_no_arg(
-    world: &World,
-    instr: &WorldIo,
-    value: Value,
-    func: impl FnOnce() -> Result<Value>,
-) -> Result<Value> {
-    (|| -> Result<_> {
-        let gen = WorldGeneration::try_from(&value)
-            .context("while evaluating initial args for world_map_io")?;
+fn world_map_no_arg(world: &World, value: Value, func: impl FnOnce() -> Value) -> Value {
+    let gen = WorldGeneration::from(&value);
 
-        let mut world_gen = world.generation.get();
+    let mut world_gen = world.generation.get();
 
-        if gen != world_gen {
-            bail!(
-                "mismatched world generation, given: {:?},\n current: {:?}",
-                gen,
-                world_gen
-            )
-        }
+    if gen != world_gen {
+        panic!(
+            "mismatched world generation, given: {:?},\n current: {:?}",
+            gen, world_gen
+        )
+    }
 
-        world_gen.0 += 1;
-        world.generation.set(world_gen);
+    world_gen.0 += 1;
+    world.generation.set(world_gen);
 
-        func().map(|val| Value::aggregate_move([world_gen.into(), val]))
-    })()
-    .with_context(|| anyhow!("while evaluating builtin {}", instr.name()))
+    Value::aggregate_move([world_gen.into(), func()])
 }
-fn world_map_io(
-    world: &World,
-    instr: &WorldIo,
-    value: Value,
-    func: impl FnOnce(&Io, Value) -> Result<Value>,
-) -> Result<Value> {
-    (|| -> Result<_> {
-        let (gen, io, value) = (|| -> Result<_> {
-            let [gen, io, rem] = get_args(value)?;
-            let gen = WorldGeneration::try_from(&gen)?;
-            let io = SyncMapKey::try_from(&io)?;
-            Ok((gen, io, rem))
-        })()
-        .context("while evaluating initial args for world_map_io")?;
+fn world_map_io(world: &World, value: Value, func: impl FnOnce(&Io, Value) -> Value) -> Value {
+    let (gen, io, value) = {
+        let [gen, io, rem] = get_args(value);
+        let gen = WorldGeneration::from(&gen);
+        let io = SyncMapKey::from(&io);
+        (gen, io, rem)
+    };
 
-        let mut world_gen = world.generation.get();
+    let mut world_gen = world.generation.get();
 
-        if gen != world_gen {
-            bail!(
-                "mismatched world generation, given: {:?},\n current: {:?}",
-                gen,
-                world_gen
-            )
-        }
+    if gen != world_gen {
+        panic!(
+            "mismatched world generation, given: {:?},\n current: {:?}",
+            gen, world_gen
+        )
+    }
 
-        world_gen.0 += 1;
-        world.generation.set(world_gen);
+    world_gen.0 += 1;
+    world.generation.set(world_gen);
 
-        let Some(io) = world.io_resources.get(io) else {
-            bail!("io resource {io:?} doesn't exist in world!")
-        };
+    let io = world.io_resources.get(io).unwrap();
 
-        func(&*io, value).map(|val| Value::aggregate_move([world_gen.into(), val]))
-    })()
-    .with_context(|| anyhow!("while evaluating builtin {}", instr.name()))
+    Value::aggregate_move([world_gen.into(), func(&*io, value)])
 }
-fn world_map_io_no_arg(
-    world: &World,
-    instr: &WorldIo,
-    value: Value,
-    func: impl FnOnce(&Io) -> Result<Value>,
-) -> Result<Value> {
-    (|| -> Result<_> {
-        let (gen, io) = (|| -> Result<_> {
-            let [gen, io] = get_args(value)?;
-            let gen = WorldGeneration::try_from(&gen)?;
-            let io = SyncMapKey::try_from(&io)?;
-            Ok((gen, io))
-        })()
-        .context("while evaluating initial args for world_map_io")?;
+fn world_map_io_no_arg(world: &World, value: Value, func: impl FnOnce(&Io) -> Value) -> Value {
+    let (gen, io) = {
+        let [gen, io] = get_args(value);
+        let gen = WorldGeneration::from(&gen);
+        let io = SyncMapKey::from(&io);
+        (gen, io)
+    };
 
-        let mut world_gen = world.generation.get();
+    let mut world_gen = world.generation.get();
 
-        if gen != world_gen {
-            bail!(
-                "mismatched world generation, given: {:?},\n current: {:?}",
-                gen,
-                world_gen
-            )
-        }
+    if gen != world_gen {
+        panic!(
+            "mismatched world generation, given: {:?},\n current: {:?}",
+            gen, world_gen
+        )
+    }
 
-        world_gen.0 += 1;
-        world.generation.set(world_gen);
+    world_gen.0 += 1;
+    world.generation.set(world_gen);
 
-        let Some(io) = world.io_resources.get(io) else {
-            bail!("io resource {io:?} doesn't exist in world!")
-        };
+    let io = world.io_resources.get(io).unwrap();
 
-        func(&*io).map(|val| Value::aggregate_move([world_gen.into(), val]))
-    })()
-    .with_context(|| anyhow!("while evaluating builtin {}", instr.name()))
+    Value::aggregate_move([world_gen.into(), func(&*io)])
 }
 
-fn val_to_offset_slice(value: &Value) -> Result<&[u8]> {
-    let aggr = value.as_aggregate().context("in val_to_offset_slice")?;
+fn val_to_offset_slice(value: &Value) -> &[u8] {
+    let aggr = value.as_aggregate();
     if aggr.len() != 3 {
-        bail!(
+        panic!(
             "expected 3 values, a start, an end, and a buffer, found {} values instead",
             aggr.len()
         )
     }
     let (start, end, buf) = (
-        (|| get_usize(aggr[0].as_bytes()?))().context("while getting offset of slice")?,
-        (|| get_usize(aggr[1].as_bytes()?))().context("while getting len of slice")?,
-        aggr[2].as_bytes().context("while getting buf of slice")?,
+        get_usize(aggr[0].as_bytes()),
+        get_usize(aggr[1].as_bytes()),
+        aggr[2].as_bytes(),
     );
-    Ok(buf
-        .get(start..end)
-        .ok_or_else(|| anyhow!("indices out of bounds of slice"))?)
+    buf.get(start..end).unwrap()
 }
-fn val_to_offset_slice_mut(value: &mut Value) -> Result<&mut [u8]> {
-    let aggr = value.as_aggregate_mut()?.make_mut();
+fn val_to_offset_slice_mut(value: &mut Value) -> &mut [u8] {
+    let aggr = value.as_aggregate_mut().make_mut();
     if aggr.len() != 3 {
-        bail!(
+        panic!(
             "expected 3 values, a start, an end, and a buffer, found {} values instead",
             aggr.len()
         )
     }
     let (start, end, buf) = (
-        (|| get_usize(aggr[0].as_bytes()?))().context("while getting offset of slice")?,
-        (|| get_usize(aggr[1].as_bytes()?))().context("while getting len of slice")?,
-        aggr[2]
-            .as_bytes_mut()
-            .context("while getting buf of slice")?
-            .make_mut(),
+        get_usize(aggr[0].as_bytes()),
+        get_usize(aggr[1].as_bytes()),
+        aggr[2].as_bytes_mut().make_mut(),
     );
-    Ok(buf
-        .get_mut(start..end)
-        .ok_or_else(|| anyhow!("indices out of bounds of slice"))?)
+    buf.get_mut(start..end).unwrap()
 }
 
-fn value_to_duration(value: Value) -> Result<Duration> {
-    (|| -> Result<_> {
-        const ONE_BILLION: u128 = 1_000_000_000;
-        let nanos = get_u128(&**value.as_bytes()?)?;
-        let secs = nanos / ONE_BILLION;
-        let subsecs_nanos = nanos % ONE_BILLION;
-        if secs > u64::MAX as u128 {
-            bail!("duration exceeds the maximum number of seconds")
-        }
-        Ok(Duration::new(secs as u64, subsecs_nanos as u32))
-    })()
-    .context("while trying to get durating from value")
+fn value_to_duration(value: Value) -> Duration {
+    const ONE_BILLION: u128 = 1_000_000_000;
+    let nanos = get_u128(&**value.as_bytes());
+    let secs = nanos / ONE_BILLION;
+    let subsecs_nanos = nanos % ONE_BILLION;
+    if secs > u64::MAX as u128 {
+        panic!("duration exceeds the maximum number of seconds")
+    }
+    Duration::new(secs as u64, subsecs_nanos as u32)
 }
