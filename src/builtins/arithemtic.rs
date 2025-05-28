@@ -13,7 +13,7 @@ use std::{
 
 use super::{
     builtin_values::{FALSE, TRUE},
-    get_args, Value,
+    get_args, FuncThunk, Value,
 };
 
 /// A byte storage which inlines small amounts of data, and otherwise can be freely
@@ -118,166 +118,168 @@ pub enum Arithmetic {
 impl Arithmetic {
     /// Operations may give results with trailing zeros, to limit allocations when possible, by
     /// always allocating a computed upper bound of the size
-    pub fn poll(self, value: Value) -> Result<Value> {
-        Ok(match self {
-            Self::Add => {
-                let [lhs, rhs] =
-                    get_args(value)?.map(|e| e.into_bytes().context("in arithmetic add"));
-                let args = [lhs?, rhs?];
-                let [lhs, rhs] = args.each_ref().map(|e| trim_zeros(e));
+    pub fn poll(self, value: Value) -> Result<FuncThunk> {
+        Ok(FuncThunk::Done {
+            value: match self {
+                Self::Add => {
+                    let [lhs, rhs] =
+                        get_args(value)?.map(|e| e.into_bytes().context("in arithmetic add"));
+                    let args = [lhs?, rhs?];
+                    let [lhs, rhs] = args.each_ref().map(|e| trim_zeros(e));
 
-                let mut res = ByteStorage::new(std::cmp::max(lhs.len(), rhs.len()) + 1);
+                    let mut res = ByteStorage::new(std::cmp::max(lhs.len(), rhs.len()) + 1);
 
-                res.iter_mut()
-                    .zip(
-                        lhs.iter()
-                            .chain(std::iter::repeat(&0))
-                            .zip(rhs.iter().chain(std::iter::repeat(&0))),
-                    )
-                    .fold(false, |carry, (dst, (lhs, rhs))| {
-                        let (r1, c1) = lhs.overflowing_add(*rhs);
-                        let (r2, c2) = r1.overflowing_add(carry as u8);
-                        *dst = r2;
-                        c1 || c2
-                    });
+                    res.iter_mut()
+                        .zip(
+                            lhs.iter()
+                                .chain(std::iter::repeat(&0))
+                                .zip(rhs.iter().chain(std::iter::repeat(&0))),
+                        )
+                        .fold(false, |carry, (dst, (lhs, rhs))| {
+                            let (r1, c1) = lhs.overflowing_add(*rhs);
+                            let (r2, c2) = r1.overflowing_add(carry as u8);
+                            *dst = r2;
+                            c1 || c2
+                        });
 
-                Value::bytes_move(res)
-            }
-            Self::Sub => {
-                let [lhs, rhs] = get_args(value)?.map(Value::into_bytes);
-                let args = [lhs?, rhs?];
-                let [lhs, rhs] = args.each_ref().map(|e| trim_zeros(e));
+                    Value::bytes_move(res)
+                }
+                Self::Sub => {
+                    let [lhs, rhs] = get_args(value)?.map(Value::into_bytes);
+                    let args = [lhs?, rhs?];
+                    let [lhs, rhs] = args.each_ref().map(|e| trim_zeros(e));
 
-                let mut res = ByteStorage::new(lhs.len());
+                    let mut res = ByteStorage::new(lhs.len());
 
-                let carry = res
-                    .iter_mut()
-                    .zip(
-                        lhs.iter()
-                            .chain(std::iter::repeat(&0))
-                            .zip(rhs.iter().chain(std::iter::repeat(&0))),
-                    )
-                    .fold(false, |carry, (dst, (lhs, rhs))| {
-                        let (r1, c1) = lhs.overflowing_sub(*rhs);
-                        let (r2, c2) = r1.overflowing_sub(carry as u8);
-                        *dst = r2;
-                        c1 || c2
-                    });
+                    let carry = res
+                        .iter_mut()
+                        .zip(
+                            lhs.iter()
+                                .chain(std::iter::repeat(&0))
+                                .zip(rhs.iter().chain(std::iter::repeat(&0))),
+                        )
+                        .fold(false, |carry, (dst, (lhs, rhs))| {
+                            let (r1, c1) = lhs.overflowing_sub(*rhs);
+                            let (r2, c2) = r1.overflowing_sub(carry as u8);
+                            *dst = r2;
+                            c1 || c2
+                        });
 
-                ensure!(
-                    !carry,
-                    "sub underflowed, left argument was less than right one"
-                );
-
-                Value::bytes_move(res)
-            }
-            Self::Mul => {
-                let [lhs, rhs] = get_args(value)?.map(Value::into_bytes);
-                let args = [lhs?, rhs?];
-                let [lhs, rhs] = args.each_ref().map(|e| trim_zeros(e));
-
-                let mut res = ByteStorage::new(lhs.len() + rhs.len());
-
-                lhs.iter().enumerate().for_each(|(i, lhs)| {
-                    rhs.iter().chain(std::iter::once(&0)).enumerate().fold(
-                        0u8,
-                        |carry, (j, rhs)| {
-                            let dst = &mut res[i + j];
-                            // Doesn't overflow, as with all max values:
-                            // 255 + 255 + (255 * 255) = 65535 (=u16::MAX)
-                            let [curr, carry] =
-                                (*dst as u16 + carry as u16 + (*lhs as u16 * *rhs as u16))
-                                    .to_le_bytes();
-                            *dst = curr;
-                            carry
-                        },
+                    ensure!(
+                        !carry,
+                        "sub underflowed, left argument was less than right one"
                     );
-                });
 
-                Value::bytes_move(res)
-            }
-            Self::Div => Value::bytes_move(div_full(value)?.0),
-            Self::Rem => Value::bytes_move(div_full(value)?.1),
-            Self::DivFull => Value::aggregate_move(
-                Into::<[ByteStorage; 2]>::into(div_full(value)?).map(Value::bytes_move),
-            ),
-            Self::Cmp => {
-                use Ordering::*;
-                fn ord_to_val(ord: Ordering) -> Value {
-                    match ord {
-                        Less => CMP_LESS,
-                        Equal => CMP_EQUAL,
-                        Greater => CMP_GREATER,
+                    Value::bytes_move(res)
+                }
+                Self::Mul => {
+                    let [lhs, rhs] = get_args(value)?.map(Value::into_bytes);
+                    let args = [lhs?, rhs?];
+                    let [lhs, rhs] = args.each_ref().map(|e| trim_zeros(e));
+
+                    let mut res = ByteStorage::new(lhs.len() + rhs.len());
+
+                    lhs.iter().enumerate().for_each(|(i, lhs)| {
+                        rhs.iter().chain(std::iter::once(&0)).enumerate().fold(
+                            0u8,
+                            |carry, (j, rhs)| {
+                                let dst = &mut res[i + j];
+                                // Doesn't overflow, as with all max values:
+                                // 255 + 255 + (255 * 255) = 65535 (=u16::MAX)
+                                let [curr, carry] =
+                                    (*dst as u16 + carry as u16 + (*lhs as u16 * *rhs as u16))
+                                        .to_le_bytes();
+                                *dst = curr;
+                                carry
+                            },
+                        );
+                    });
+
+                    Value::bytes_move(res)
+                }
+                Self::Div => Value::bytes_move(div_full(value)?.0),
+                Self::Rem => Value::bytes_move(div_full(value)?.1),
+                Self::DivFull => Value::aggregate_move(
+                    Into::<[ByteStorage; 2]>::into(div_full(value)?).map(Value::bytes_move),
+                ),
+                Self::Cmp => {
+                    use Ordering::*;
+                    fn ord_to_val(ord: Ordering) -> Value {
+                        match ord {
+                            Less => CMP_LESS,
+                            Equal => CMP_EQUAL,
+                            Greater => CMP_GREATER,
+                        }
+                    }
+
+                    let [lhs, rhs] = get_args(value)?.map(Value::into_bytes);
+                    let args = [lhs?, rhs?];
+                    let [lhs, rhs] = args.each_ref().map(|e| trim_zeros(e));
+                    match lhs.len().cmp(&rhs.len()) {
+                        Equal => ord_to_val(lhs.iter().rev().cmp(rhs.iter().rev())),
+                        o => ord_to_val(o),
                     }
                 }
+                Self::Shl => {
+                    let [lhs, rhs] = get_args(value)?;
+                    let offset = get_usize(rhs.as_bytes()?)?;
+                    let lhs = trim_zeros(lhs.as_bytes()?);
 
-                let [lhs, rhs] = get_args(value)?.map(Value::into_bytes);
-                let args = [lhs?, rhs?];
-                let [lhs, rhs] = args.each_ref().map(|e| trim_zeros(e));
-                match lhs.len().cmp(&rhs.len()) {
-                    Equal => ord_to_val(lhs.iter().rev().cmp(rhs.iter().rev())),
-                    o => ord_to_val(o),
+                    let (bits, bytes) = (offset % 8, offset / 8);
+
+                    let mut res = ByteStorage::new(lhs.len() + bytes + 1);
+
+                    res.iter_mut()
+                        .skip(bytes)
+                        .zip(shl_mod8_iter(lhs, bits as u32))
+                        .for_each(|(dst, src)| *dst = src);
+
+                    Value::bytes_move(res)
                 }
-            }
-            Self::Shl => {
-                let [lhs, rhs] = get_args(value)?;
-                let offset = get_usize(rhs.as_bytes()?)?;
-                let lhs = trim_zeros(lhs.as_bytes()?);
+                Self::Shr => {
+                    let [lhs, rhs] = get_args(value)?;
+                    let offset = get_usize(rhs.as_bytes()?)?;
+                    let lhs = trim_zeros(lhs.as_bytes()?);
 
-                let (bits, bytes) = (offset % 8, offset / 8);
+                    let (bits, bytes) = (offset % 8, offset / 8);
 
-                let mut res = ByteStorage::new(lhs.len() + bytes + 1);
+                    let mut res = ByteStorage::new(lhs.len().saturating_sub(bytes));
 
-                res.iter_mut()
-                    .skip(bytes)
-                    .zip(shl_mod8_iter(lhs, bits as u32))
-                    .for_each(|(dst, src)| *dst = src);
+                    res.iter_mut()
+                        .zip(shr_mod8_iter(
+                            lhs.get(bytes..).unwrap_or_default(),
+                            bits as u32,
+                        ))
+                        .for_each(|(dst, src)| *dst = src);
 
-                Value::bytes_move(res)
-            }
-            Self::Shr => {
-                let [lhs, rhs] = get_args(value)?;
-                let offset = get_usize(rhs.as_bytes()?)?;
-                let lhs = trim_zeros(lhs.as_bytes()?);
-
-                let (bits, bytes) = (offset % 8, offset / 8);
-
-                let mut res = ByteStorage::new(lhs.len().saturating_sub(bytes));
-
-                res.iter_mut()
-                    .zip(shr_mod8_iter(
-                        lhs.get(bytes..).unwrap_or_default(),
-                        bits as u32,
-                    ))
-                    .for_each(|(dst, src)| *dst = src);
-
-                Value::bytes_move(res)
-            }
-            Self::Not => {
-                let mut bytes = value;
-                bytes
-                    .as_bytes_mut()?
-                    .make_mut()
-                    .iter_mut()
-                    .for_each(|b| *b = !*b);
-                bytes
-            }
-            Self::And => binary_bytewise(value, std::ops::BitAnd::bitand)
-                .context("in arithmetic function and")?,
-            Self::Or => binary_bytewise(value, std::ops::BitOr::bitor)
-                .context("in arithmetic function or")?,
-            Self::Xor => binary_bytewise(value, std::ops::BitXor::bitxor)
-                .context("in arithmetic function xor")?,
-            Self::Eq => {
-                let [lhs, rhs] = get_args(value)?.map(Value::into_bytes);
-                let args = [lhs?, rhs?];
-                let [lhs, rhs] = args.each_ref().map(|e| trim_zeros(e));
-
-                match lhs == rhs {
-                    true => TRUE,
-                    false => FALSE,
+                    Value::bytes_move(res)
                 }
-            }
+                Self::Not => {
+                    let mut bytes = value;
+                    bytes
+                        .as_bytes_mut()?
+                        .make_mut()
+                        .iter_mut()
+                        .for_each(|b| *b = !*b);
+                    bytes
+                }
+                Self::And => binary_bytewise(value, std::ops::BitAnd::bitand)
+                    .context("in arithmetic function and")?,
+                Self::Or => binary_bytewise(value, std::ops::BitOr::bitor)
+                    .context("in arithmetic function or")?,
+                Self::Xor => binary_bytewise(value, std::ops::BitXor::bitxor)
+                    .context("in arithmetic function xor")?,
+                Self::Eq => {
+                    let [lhs, rhs] = get_args(value)?.map(Value::into_bytes);
+                    let args = [lhs?, rhs?];
+                    let [lhs, rhs] = args.each_ref().map(|e| trim_zeros(e));
+
+                    match lhs == rhs {
+                        true => TRUE,
+                        false => FALSE,
+                    }
+                }
+            },
         })
     }
     pub fn from_ident(ident: &[u8]) -> Option<Self> {

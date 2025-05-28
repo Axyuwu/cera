@@ -17,6 +17,7 @@ use crate::utils::sync::sync_map::{SyncMap, SyncMapKey};
 use super::eval;
 use super::get_args;
 use super::get_usize;
+use super::FuncThunk;
 use super::Value;
 
 #[derive(Debug)]
@@ -306,7 +307,7 @@ impl WorldIo {
             Self::HintSpinLoop => "hint_spin_loop",
         }
     }
-    pub fn poll(self, value: Value, world: &mut World) -> Result<Value> {
+    pub fn poll(self, value: Value, world: &mut World) -> Result<FuncThunk> {
         match self {
             WorldIo::IoRead => world_map_io(world, &self, value, |io, mut value| {
                 let res = io.read(val_to_offset_slice_mut(&mut value)?)?;
@@ -400,6 +401,7 @@ impl WorldIo {
             WorldIo::EnvConstants => todo!(),
             WorldIo::HintSpinLoop => todo!(),
         }
+        .map(|value| FuncThunk::Done { value })
     }
 }
 

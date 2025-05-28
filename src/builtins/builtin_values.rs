@@ -1,6 +1,7 @@
 use anyhow::bail;
 use anyhow::Result;
 
+use super::FuncThunk;
 use super::Value;
 
 const fn trim_trailing_zeros(slice: &[u8]) -> &[u8] {
@@ -40,37 +41,39 @@ macro_rules! cera_expr {
 pub struct BuiltinImport;
 
 impl BuiltinImport {
-    pub fn poll(self, value: Value) -> Result<Value> {
-        Ok(match &**value.as_bytes()? {
-            b"builtin_eval_func" => BUILTIN_EVAL_FUNC,
-            b"aggr_map" => AGGR_MAP,
-            b"aggr_slice_get" => AGGR_SLICE_GET,
-            b"aggr_slice_try_get" => AGGR_SLICE_TRY_GET,
-            b"bool_then" => BOOL_THEN,
-            b"bool_then_some" => BOOL_THEN_SOME,
-            b"some_new" => SOME_NEW,
-            b"none" => NONE,
-            b"pipe" => PIPE,
-            b"compose" => COMPOSE,
-            b"bool_not" => BOOL_NOT,
-            b"aggr_slice_new" => AGGR_SLICE_NEW,
-            b"aggr_slice_buf" => AGGR_SLICE_BUF,
-            b"aggr_slice_try_set" => AGGR_SLICE_TRY_SET,
-            b"aggr_slice_set" => AGGR_SLICE_SET,
-            b"aggr_slice_len" => AGGR_SLICE_LEN,
-            b"aggr_slice_is_empty" => AGGR_SLICE_IS_EMPTY,
-            b"aggr_slice_map_fold" => AGGR_SLICE_MAP_FOLD,
-            b"aggr_slice_map" => AGGR_SLICE_MAP,
-            b"aggr_slice_fold" => AGGR_SLICE_FOLD,
-            b"aggr_vec_slice" => AGGR_VEC_SLICE,
-            b"min" => MIN,
-            b"max" => MAX,
-            b"true" => TRUE,
-            b"false" => FALSE,
-            b"cmp_less" => CMP_LESS,
-            b"cmp_equal" => CMP_EQUAL,
-            b"cmp_greater" => CMP_GREATER,
-            _ => bail!("invalid builtin_import argument: {value}"),
+    pub(super) fn poll(self, value: Value) -> Result<FuncThunk> {
+        Ok(FuncThunk::Done {
+            value: match &**value.as_bytes()? {
+                b"builtin_eval_func" => BUILTIN_EVAL_FUNC,
+                b"aggr_map" => AGGR_MAP,
+                b"aggr_slice_get" => AGGR_SLICE_GET,
+                b"aggr_slice_try_get" => AGGR_SLICE_TRY_GET,
+                b"bool_then" => BOOL_THEN,
+                b"bool_then_some" => BOOL_THEN_SOME,
+                b"some_new" => SOME_NEW,
+                b"none" => NONE,
+                b"pipe" => PIPE,
+                b"compose" => COMPOSE,
+                b"bool_not" => BOOL_NOT,
+                b"aggr_slice_new" => AGGR_SLICE_NEW,
+                b"aggr_slice_buf" => AGGR_SLICE_BUF,
+                b"aggr_slice_try_set" => AGGR_SLICE_TRY_SET,
+                b"aggr_slice_set" => AGGR_SLICE_SET,
+                b"aggr_slice_len" => AGGR_SLICE_LEN,
+                b"aggr_slice_is_empty" => AGGR_SLICE_IS_EMPTY,
+                b"aggr_slice_map_fold" => AGGR_SLICE_MAP_FOLD,
+                b"aggr_slice_map" => AGGR_SLICE_MAP,
+                b"aggr_slice_fold" => AGGR_SLICE_FOLD,
+                b"aggr_vec_slice" => AGGR_VEC_SLICE,
+                b"min" => MIN,
+                b"max" => MAX,
+                b"true" => TRUE,
+                b"false" => FALSE,
+                b"cmp_less" => CMP_LESS,
+                b"cmp_equal" => CMP_EQUAL,
+                b"cmp_greater" => CMP_GREATER,
+                _ => bail!("invalid builtin_import argument: {value}"),
+            },
         })
     }
     pub fn from_ident(ident: &[u8]) -> Option<Self> {
