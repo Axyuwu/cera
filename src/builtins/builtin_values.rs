@@ -34,7 +34,7 @@ macro_rules! cera_expr {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone, Copy)]
 pub struct BuiltinImport;
 
 impl BuiltinImport {
