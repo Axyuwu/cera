@@ -30,7 +30,6 @@ pub struct CacheInner {
 pub fn eval_builtin(atom: Atom) -> Value {
     let (mut world, world_handle) = World::new();
     let atom = atom_to_val(atom);
-    static CACHE: Cache = Cache::new();
     FuncThunk::Step {
         func: BuiltinFunc::Call,
         value: Value::aggregate_move([builtin_values::BUILTIN_EVAL_FUNC.static_copy(), atom]),
@@ -78,10 +77,9 @@ impl FuncThunk {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone, Copy)]
 enum BuiltinFunc {
     BuiltinEval,
-    Let(Let),
     Call,
     If,
     BytesEq,
@@ -101,8 +99,7 @@ impl BuiltinFunc {
         use FuncThunk::*;
         match self {
             Self::BuiltinEval => Self::poll_builtin_eval(value),
-            Self::Let(let_eval) => let_eval.poll(value, world),
-            Self::Call => Self::poll_call(value),
+            Self::Call => Self::poll_call(value, world),
             Self::If => Self::poll_if(value),
             Self::BytesEq => Self::poll_bytes_eq(value),
             Self::Identity => Done { value },
@@ -118,16 +115,13 @@ impl BuiltinFunc {
     fn poll_builtin_eval(value: Value) -> FuncThunk {
         let [ident, value] = get_args(value);
         FuncThunk::Step {
-            func: CopyFunc::from_value(&ident).into(),
+            func: BuiltinFunc::from_value(&ident).into(),
             value,
         }
     }
-    fn poll_call(value: Value) -> FuncThunk {
+    fn poll_call(value: Value, world: &mut World) -> FuncThunk {
         let [func, arg] = get_args(value);
-        FuncThunk::Step {
-            func: Self::Let(Let::init(func)),
-            value: arg,
-        }
+        Let::init(func).poll(arg, world)
     }
     fn poll_if(value: Value) -> FuncThunk {
         let [cond, ifthen, ifelse] = get_args(value);
@@ -182,44 +176,6 @@ impl BuiltinFunc {
             ),
         }
     }
-}
-
-#[derive(Debug, Clone, Copy)]
-enum CopyFunc {
-    BuiltinEval,
-    Call,
-    If,
-    BytesEq,
-    Identity,
-    AggrGet,
-    AggrSet,
-    AggrLen,
-    AggrMake,
-    Arithmetic(Arithmetic),
-    WorldIo(WorldIo),
-    BuiltinImport(BuiltinImport),
-}
-
-impl From<CopyFunc> for BuiltinFunc {
-    fn from(value: CopyFunc) -> Self {
-        match value {
-            CopyFunc::BuiltinEval => Self::BuiltinEval,
-            CopyFunc::Call => Self::Call,
-            CopyFunc::If => Self::If,
-            CopyFunc::BytesEq => Self::BytesEq,
-            CopyFunc::Identity => Self::Identity,
-            CopyFunc::AggrGet => Self::AggrGet,
-            CopyFunc::AggrSet => Self::AggrSet,
-            CopyFunc::AggrLen => Self::AggrLen,
-            CopyFunc::AggrMake => Self::AggrMake,
-            CopyFunc::Arithmetic(arithmetic) => Self::Arithmetic(arithmetic),
-            CopyFunc::WorldIo(world_io) => Self::WorldIo(world_io),
-            CopyFunc::BuiltinImport(builtin_import) => Self::BuiltinImport(builtin_import),
-        }
-    }
-}
-
-impl CopyFunc {
     fn from_value(value: &Value) -> Self {
         match &**value.as_bytes() {
             b"builtin_eval" => Self::BuiltinEval,
@@ -256,7 +212,7 @@ struct Let {
 
 #[derive(Debug)]
 struct LetStep {
-    func: CopyFunc,
+    func: BuiltinFunc,
     args: LetStepArgs,
 }
 
@@ -310,7 +266,7 @@ impl LetProcessed {
                 let expression = expression.as_aggregate();
                 let [func, args] = expression.as_array();
 
-                let func = CopyFunc::from_value(func);
+                let func = BuiltinFunc::from_value(func);
 
                 LetStep {
                     func,
@@ -366,7 +322,7 @@ impl Let {
 
             let res = args.fetch(state);
 
-            let func = (*func).into();
+            let func = *func;
 
             if *idx == state.len() {
                 break FuncThunk::Step { func, value: res };
@@ -400,12 +356,6 @@ impl Let {
 pub fn get_args<const SIZE: usize>(value: Value) -> [Value; SIZE] {
     let slice = value.into_aggregate();
     slice.into_array()
-}
-
-#[inline]
-pub fn get_args_ref<const SIZE: usize>(value: &Value) -> &[Value; SIZE] {
-    let slice = value.as_aggregate();
-    slice.as_array()
 }
 
 // Little endian
