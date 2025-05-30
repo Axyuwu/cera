@@ -2,13 +2,14 @@ mod arithemtic;
 pub mod builtin_values;
 mod world;
 
+use crate::utils::sync::cache_arc::CacheArc as Arc;
+use crate::utils::sync::cache_lock::CacheLock;
 use std::convert::Infallible;
 use std::fmt::Debug;
 use std::fmt::Display;
 use std::fmt::Write;
 use std::ops::ControlFlow;
 use std::ops::Deref;
-use std::sync::Arc;
 
 use arithemtic::trim_zeros;
 use arithemtic::Arithmetic;
@@ -88,10 +89,17 @@ impl HasSliceStorage for u8 {
     type Storage = U8SliceStorage;
 }
 
+type Cache = CacheLock<CacheInner>;
+
+#[derive(Debug, Clone)]
+pub struct CacheInner {
+    func: Arc<LetProcessed>,
+}
+
 #[derive(Debug, Clone)]
 pub enum EvalSlice<T: 'static + HasSliceStorage> {
-    Arc(Arc<[T]>),
-    Borrowed(&'static [T]),
+    Arc(Arc<[T], Cache>),
+    Borrowed(&'static Cache, &'static [T]),
     Inline(T::Storage),
 }
 
@@ -100,7 +108,7 @@ impl<T: HasSliceStorage> Deref for EvalSlice<T> {
     fn deref(&self) -> &[T] {
         match self {
             EvalSlice::Arc(items) => items.as_ref(),
-            EvalSlice::Borrowed(items) => items.as_ref(),
+            EvalSlice::Borrowed(_, items) => items.as_ref(),
             EvalSlice::Inline(items) => items.get(),
         }
     }
@@ -110,7 +118,7 @@ impl<T: HasSliceStorage> EvalSlice<T> {
     fn get_mut(&mut self) -> Option<&mut [T]> {
         match self {
             EvalSlice::Arc(items) => Arc::get_mut(items),
-            EvalSlice::Borrowed(_) => None,
+            EvalSlice::Borrowed(_, _) => None,
             EvalSlice::Inline(items) => Some(items.get_mut()),
         }
     }
@@ -119,8 +127,8 @@ impl<T: HasSliceStorage> EvalSlice<T> {
         T: Clone,
     {
         match self {
-            EvalSlice::Arc(items) => Arc::make_mut(items),
-            EvalSlice::Borrowed(items) => {
+            EvalSlice::Arc(items) => Arc::<[_], _>::make_mut(items),
+            EvalSlice::Borrowed(_, items) => {
                 *self = Self::Arc((*items).into());
                 self.make_mut()
             }
@@ -130,7 +138,7 @@ impl<T: HasSliceStorage> EvalSlice<T> {
     fn addr_eq(&self, rhs: &Self) -> bool {
         match (self, rhs) {
             (Self::Inline(lhs), rhs) => lhs.eq(&*rhs),
-            (Self::Borrowed(lhs), Self::Borrowed(rhs)) => std::ptr::eq(lhs, rhs),
+            (Self::Borrowed(_, lhs), Self::Borrowed(_, rhs)) => std::ptr::eq(lhs, rhs),
             (Self::Arc(lhs), Self::Arc(rhs)) => std::ptr::eq(&*lhs, &*rhs),
             _ => false,
         }
@@ -142,16 +150,38 @@ impl<T: HasSliceStorage> EvalSlice<T> {
         let s = &*self;
         assert!(s.len() == SIZE);
         match self {
-            Self::Arc(inner) => unsafe {
-                let slice: *const [T] = Arc::into_raw(inner);
-                let ptr: *const [T; SIZE] = std::mem::transmute((&*slice).as_ptr());
-                Arc::unwrap_or_clone(Arc::from_raw(ptr))
-            },
+            Self::Arc(inner) => Arc::unwrap_or_clone(inner.try_into().unwrap()),
             _ => TryInto::<&[T; SIZE]>::try_into(s).unwrap().clone(),
         }
     }
     fn as_array<const SIZE: usize>(&self) -> &[T; SIZE] {
         (&**self).try_into().unwrap()
+    }
+    #[inline]
+    fn gen_cache(&mut self)
+    where
+        T: Clone,
+    {
+        match self {
+            EvalSlice::Inline(storage) => {
+                *self = EvalSlice::Arc(storage.get().into());
+            }
+            _ => (),
+        }
+    }
+    #[inline]
+    fn cache(&self) -> &Cache {
+        match self {
+            EvalSlice::Arc(arc) => Arc::cache(arc),
+            EvalSlice::Borrowed(cache, _) => cache,
+            _ => panic!(),
+        }
+    }
+    pub const fn static_copy(&self) -> Self {
+        match self {
+            EvalSlice::Borrowed(cache_lock, items) => Self::Borrowed(cache_lock, items),
+            _ => panic!(),
+        }
     }
 }
 
@@ -168,8 +198,29 @@ impl Debug for Value {
 }
 
 impl Value {
+    pub const fn static_copy(&self) -> Self {
+        match self {
+            Value::Bytes(eval_slice) => Self::Bytes(eval_slice.static_copy()),
+            Value::Aggregate(eval_slice) => Self::Aggregate(eval_slice.static_copy()),
+        }
+    }
+    #[inline]
+    pub fn gen_cache(&mut self) {
+        match self {
+            Value::Bytes(eval_slice) => eval_slice.gen_cache(),
+            Value::Aggregate(eval_slice) => eval_slice.gen_cache(),
+        }
+    }
+    #[inline]
+    pub fn cache(&self) -> &Cache {
+        match self {
+            Value::Bytes(eval_slice) => eval_slice.cache(),
+            Value::Aggregate(eval_slice) => eval_slice.cache(),
+        }
+    }
     pub const fn unit() -> Self {
-        Self::aggregate_const(&[])
+        static CACHE: Cache = Cache::new();
+        Self::aggregate_const(&CACHE, &[])
     }
     pub fn is_unit(&self) -> bool {
         match self {
@@ -177,16 +228,17 @@ impl Value {
             _ => false,
         }
     }
-    pub const fn aggregate_const(slice: &'static [Self]) -> Self {
-        Self::Aggregate(EvalSlice::Borrowed(slice))
+    pub const fn aggregate_const(cache: &'static Cache, slice: &'static [Self]) -> Self {
+        Self::Aggregate(EvalSlice::Borrowed(cache, slice))
     }
-    pub fn aggregate(slice: &'static (impl AsRef<[Self]> + ?Sized)) -> Self {
-        Self::aggregate_const(slice.as_ref())
+    pub fn aggregate(slice: &'static (impl AsRef<(Cache, [Self])> + ?Sized)) -> Self {
+        let (cache, slice) = slice.as_ref();
+        Self::aggregate_const(cache, slice)
     }
     pub fn aggregate_cloned(slice: impl AsRef<[Self]>) -> Self {
         Self::Aggregate(EvalSlice::Arc(slice.as_ref().into()))
     }
-    pub fn aggregate_move(slice: impl Into<Arc<[Self]>>) -> Self {
+    pub fn aggregate_move(slice: impl Into<Arc<[Self], Cache>>) -> Self {
         Self::Aggregate(EvalSlice::Arc(slice.into()))
     }
     pub fn into_aggregate(self) -> EvalSlice<Value> {
@@ -207,16 +259,13 @@ impl Value {
         };
         s
     }
-    pub const fn bytes_const(slice: &'static [u8]) -> Self {
-        Self::Bytes(EvalSlice::Borrowed(slice))
+    pub const fn bytes_const(cache: &'static Cache, slice: &'static [u8]) -> Self {
+        Self::Bytes(EvalSlice::Borrowed(cache, slice))
     }
-    pub fn bytes(slice: &'static (impl AsRef<[u8]> + ?Sized)) -> Self {
-        let bytes = slice.as_ref();
-        if let Some(slice) = <u8 as HasSliceStorage>::Storage::try_new(bytes) {
-            Self::Bytes(EvalSlice::Inline(slice))
-        } else {
-            Self::Bytes(EvalSlice::Borrowed(bytes))
-        }
+    pub fn bytes(slice: &'static (impl AsRef<(Cache, [u8])> + ?Sized)) -> Self {
+        let (cache, bytes) = slice.as_ref();
+
+        Self::Bytes(EvalSlice::Borrowed(cache, bytes))
     }
     pub fn bytes_cloned(slice: impl AsRef<[u8]>) -> Self {
         let bytes = slice.as_ref();
@@ -226,7 +275,7 @@ impl Value {
             Self::Bytes(EvalSlice::Arc(bytes.into()))
         }
     }
-    pub fn bytes_move(slice: impl Into<Arc<[u8]>> + AsRef<[u8]>) -> Self {
+    pub fn bytes_move(slice: impl Into<Arc<[u8], Cache>> + AsRef<[u8]>) -> Self {
         if let Some(slice) = <u8 as HasSliceStorage>::Storage::try_new(slice.as_ref()) {
             Self::Bytes(EvalSlice::Inline(slice))
         } else {
@@ -357,9 +406,11 @@ impl Value {
         F1: FnOnce(I1) -> Value,
         F2: FnOnce(I2) -> Value,
     {
+        static OK_CACHE: Cache = Cache::new();
+        static ERR_CACHE: Cache = Cache::new();
         match res {
-            Ok(i1) => Value::aggregate_move([Value::bytes_const(b"ok"), f1(i1)]),
-            Err(i2) => Value::aggregate_move([Value::bytes_const(b"err"), f2(i2)]),
+            Ok(i1) => Value::aggregate_move([Value::bytes_const(&OK_CACHE, b"ok"), f1(i1)]),
+            Err(i2) => Value::aggregate_move([Value::bytes_const(&ERR_CACHE, b"err"), f2(i2)]),
         }
     }
     pub fn addr_eq(&self, rhs: &Self) -> bool {
@@ -380,30 +431,37 @@ impl Display for Value {
 pub fn eval_builtin(atom: Atom) -> Value {
     let (world, world_handle) = World::new();
     let atom = atom_to_val(atom);
+    static CACHE: Cache = Cache::new();
     eval(
         Value::aggregate_move([
-            Value::bytes("call"),
-            Value::aggregate_move([builtin_values::BUILTIN_EVAL_FUNC, atom]),
+            Value::bytes_const(&CACHE, b"call"),
+            Value::aggregate_move([builtin_values::BUILTIN_EVAL_FUNC.static_copy(), atom]),
         ]),
         world,
     )
 }
 
 fn atom_to_val(atom: Atom) -> Value {
+    static AGGR_CACHE: Cache = Cache::new();
+    static IDENTIFIER_CACHE: Cache = Cache::new();
+    static STRING_CACHE: Cache = Cache::new();
     match atom {
         Atom::Aggr(aggr) => Value::aggregate_move([
-            Value::bytes("aggregate"),
+            Value::bytes_const(&AGGR_CACHE, b"aggregate"),
             Value::aggregate_move(
                 <Box<[_]> as IntoIterator>::into_iter(aggr)
                     .map(atom_to_val)
-                    .collect::<Arc<_>>(),
+                    .collect::<Arc<_, _>>(),
             ),
         ]),
         Atom::Identifier(s) => Value::aggregate_move([
-            Value::bytes("identifier"),
-            Value::bytes_move(s.into_boxed_bytes()),
+            Value::bytes_const(&IDENTIFIER_CACHE, b"identifier"),
+            Value::bytes_move(s.as_bytes()),
         ]),
-        Atom::Bytes(s) => Value::aggregate_move([Value::bytes("string"), Value::bytes_move(s)]),
+        Atom::Bytes(s) => Value::aggregate_move([
+            Value::bytes_const(&STRING_CACHE, b"string"),
+            Value::bytes_move(&*s),
+        ]),
     }
 }
 
@@ -572,8 +630,8 @@ impl BuiltinFunc {
 
         FuncThunk::Done {
             value: match *lhs == *rhs {
-                true => TRUE,
-                false => FALSE,
+                true => TRUE.static_copy(),
+                false => FALSE.static_copy(),
             },
         }
     }
@@ -605,7 +663,7 @@ impl BuiltinFunc {
             value: Value::aggregate_move(
                 std::iter::repeat(Value::unit())
                     .take(get_usize(value.as_bytes()))
-                    .collect::<Box<_>>(),
+                    .collect::<Arc<_, _>>(),
             ),
         }
     }
@@ -723,11 +781,11 @@ struct LetProcessed {
 }
 
 impl LetProcessed {
-    fn process_func(func: Value) -> Self {
+    fn process_func(func: &Value) -> Self {
         let [constants, expressions] = get_args(func.clone()).map(Value::into_aggregate);
         assert!(!expressions.is_empty(),);
 
-        let constants: Box<[_]> = std::iter::once(func)
+        let constants: Box<[_]> = std::iter::once(func.clone())
             .chain(constants.iter().cloned())
             .collect();
 
@@ -804,8 +862,12 @@ impl Let {
             }
         }
     }
-    fn init(func: Value) -> Self {
-        Self::new(Arc::new(LetProcessed::process_func(func)))
+    fn init(mut func: Value) -> Self {
+        func.gen_cache();
+        let res = func.cache().generate(|| CacheInner {
+            func: Arc::new(LetProcessed::process_func(&func)),
+        });
+        Self::new(res.func.clone())
     }
     fn new(processed: Arc<LetProcessed>) -> Self {
         Self {

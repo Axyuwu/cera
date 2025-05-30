@@ -7,7 +7,7 @@ use std::{
 };
 
 use crate::{
-    builtins::{usize_to_val, Value},
+    builtins::{usize_to_val, Cache, Value},
     utils::sync::spinmutex::SpinMutex,
 };
 
@@ -52,44 +52,188 @@ impl Thread {
 }
 
 fn io_err_to_val(error: std::io::Error) -> Value {
-    Value::bytes_const(match error.kind() {
-        std::io::ErrorKind::NotFound => b"not_found",
-        std::io::ErrorKind::PermissionDenied => b"permission_denied",
-        std::io::ErrorKind::ConnectionReset => b"connection_reset",
-        std::io::ErrorKind::HostUnreachable => b"host_unreachable",
-        std::io::ErrorKind::NetworkUnreachable => b"network_unreachable",
-        std::io::ErrorKind::ConnectionAborted => b"connection_aborted",
-        std::io::ErrorKind::NotConnected => b"not_connected",
-        std::io::ErrorKind::AddrInUse => b"addr_in_use",
-        std::io::ErrorKind::AddrNotAvailable => b"addr_not_available",
-        std::io::ErrorKind::NetworkDown => b"network_down",
-        std::io::ErrorKind::BrokenPipe => b"broken_pipe",
-        std::io::ErrorKind::AlreadyExists => b"already_exists",
-        std::io::ErrorKind::WouldBlock => b"would_block",
-        std::io::ErrorKind::NotADirectory => b"not_a_directory",
-        std::io::ErrorKind::IsADirectory => b"is_a_directory",
-        std::io::ErrorKind::DirectoryNotEmpty => b"directory_not_empty",
-        std::io::ErrorKind::ReadOnlyFilesystem => b"read_only_filesystem",
-        std::io::ErrorKind::StaleNetworkFileHandle => b"stale_network_file_handle",
-        std::io::ErrorKind::InvalidInput => b"invalid_input",
-        std::io::ErrorKind::InvalidData => b"invalid_data",
-        std::io::ErrorKind::TimedOut => b"timed_out",
-        std::io::ErrorKind::WriteZero => b"write_zero",
-        std::io::ErrorKind::StorageFull => b"storage_full",
-        std::io::ErrorKind::NotSeekable => b"not_seekable",
-        std::io::ErrorKind::FileTooLarge => b"file_too_large",
-        std::io::ErrorKind::ResourceBusy => b"resource_busy",
-        std::io::ErrorKind::ExecutableFileBusy => b"executable_file_busy",
-        std::io::ErrorKind::Deadlock => b"deadlock",
-        std::io::ErrorKind::TooManyLinks => b"too_many_links",
-        std::io::ErrorKind::ArgumentListTooLong => b"argument_list_too_long",
-        std::io::ErrorKind::Interrupted => b"interrupted",
-        std::io::ErrorKind::Unsupported => b"unsupported",
-        std::io::ErrorKind::UnexpectedEof => b"unexpected_eof",
-        std::io::ErrorKind::OutOfMemory => b"out_of_memory",
-        std::io::ErrorKind::Other => b"other",
-        _ => b"other_unknown",
-    })
+    match error.kind() {
+        std::io::ErrorKind::NotFound => {
+            static RESULT_CACHE: Cache = Cache::new();
+            static RESULT: Value = Value::bytes_const(&RESULT_CACHE, b"not_found");
+            RESULT.static_copy()
+        }
+        std::io::ErrorKind::PermissionDenied => {
+            static RESULT_CACHE: Cache = Cache::new();
+            static RESULT: Value = Value::bytes_const(&RESULT_CACHE, b"permission_denied");
+            RESULT.static_copy()
+        }
+        std::io::ErrorKind::ConnectionReset => {
+            static RESULT_CACHE: Cache = Cache::new();
+            static RESULT: Value = Value::bytes_const(&RESULT_CACHE, b"connection_reset");
+            RESULT.static_copy()
+        }
+        std::io::ErrorKind::HostUnreachable => {
+            static RESULT_CACHE: Cache = Cache::new();
+            static RESULT: Value = Value::bytes_const(&RESULT_CACHE, b"host_unreachable");
+            RESULT.static_copy()
+        }
+        std::io::ErrorKind::NetworkUnreachable => {
+            static RESULT_CACHE: Cache = Cache::new();
+            static RESULT: Value = Value::bytes_const(&RESULT_CACHE, b"network_unreachable");
+            RESULT.static_copy()
+        }
+        std::io::ErrorKind::ConnectionAborted => {
+            static RESULT_CACHE: Cache = Cache::new();
+            static RESULT: Value = Value::bytes_const(&RESULT_CACHE, b"connection_aborted");
+            RESULT.static_copy()
+        }
+        std::io::ErrorKind::NotConnected => {
+            static RESULT_CACHE: Cache = Cache::new();
+            static RESULT: Value = Value::bytes_const(&RESULT_CACHE, b"not_connected");
+            RESULT.static_copy()
+        }
+        std::io::ErrorKind::AddrInUse => {
+            static RESULT_CACHE: Cache = Cache::new();
+            static RESULT: Value = Value::bytes_const(&RESULT_CACHE, b"addr_in_use");
+            RESULT.static_copy()
+        }
+        std::io::ErrorKind::AddrNotAvailable => {
+            static RESULT_CACHE: Cache = Cache::new();
+            static RESULT: Value = Value::bytes_const(&RESULT_CACHE, b"addr_not_available");
+            RESULT.static_copy()
+        }
+        std::io::ErrorKind::NetworkDown => {
+            static RESULT_CACHE: Cache = Cache::new();
+            static RESULT: Value = Value::bytes_const(&RESULT_CACHE, b"network_down");
+            RESULT.static_copy()
+        }
+        std::io::ErrorKind::BrokenPipe => {
+            static RESULT_CACHE: Cache = Cache::new();
+            static RESULT: Value = Value::bytes_const(&RESULT_CACHE, b"broken_pipe");
+            RESULT.static_copy()
+        }
+        std::io::ErrorKind::AlreadyExists => {
+            static RESULT_CACHE: Cache = Cache::new();
+            static RESULT: Value = Value::bytes_const(&RESULT_CACHE, b"already_exists");
+            RESULT.static_copy()
+        }
+        std::io::ErrorKind::WouldBlock => {
+            static RESULT_CACHE: Cache = Cache::new();
+            static RESULT: Value = Value::bytes_const(&RESULT_CACHE, b"would_block");
+            RESULT.static_copy()
+        }
+        std::io::ErrorKind::NotADirectory => {
+            static RESULT_CACHE: Cache = Cache::new();
+            static RESULT: Value = Value::bytes_const(&RESULT_CACHE, b"not_a_directory");
+            RESULT.static_copy()
+        }
+        std::io::ErrorKind::IsADirectory => {
+            static RESULT_CACHE: Cache = Cache::new();
+            static RESULT: Value = Value::bytes_const(&RESULT_CACHE, b"is_a_directory");
+            RESULT.static_copy()
+        }
+        std::io::ErrorKind::DirectoryNotEmpty => {
+            static RESULT_CACHE: Cache = Cache::new();
+            static RESULT: Value = Value::bytes_const(&RESULT_CACHE, b"directory_not_empty");
+            RESULT.static_copy()
+        }
+        std::io::ErrorKind::ReadOnlyFilesystem => {
+            static RESULT_CACHE: Cache = Cache::new();
+            static RESULT: Value = Value::bytes_const(&RESULT_CACHE, b"read_only_filesystem");
+            RESULT.static_copy()
+        }
+        std::io::ErrorKind::StaleNetworkFileHandle => {
+            static RESULT_CACHE: Cache = Cache::new();
+            static RESULT: Value = Value::bytes_const(&RESULT_CACHE, b"stale_network_file_handle");
+            RESULT.static_copy()
+        }
+        std::io::ErrorKind::InvalidInput => {
+            static RESULT_CACHE: Cache = Cache::new();
+            static RESULT: Value = Value::bytes_const(&RESULT_CACHE, b"invalid_input");
+            RESULT.static_copy()
+        }
+        std::io::ErrorKind::InvalidData => {
+            static RESULT_CACHE: Cache = Cache::new();
+            static RESULT: Value = Value::bytes_const(&RESULT_CACHE, b"invalid_data");
+            RESULT.static_copy()
+        }
+        std::io::ErrorKind::TimedOut => {
+            static RESULT_CACHE: Cache = Cache::new();
+            static RESULT: Value = Value::bytes_const(&RESULT_CACHE, b"timed_out");
+            RESULT.static_copy()
+        }
+        std::io::ErrorKind::WriteZero => {
+            static RESULT_CACHE: Cache = Cache::new();
+            static RESULT: Value = Value::bytes_const(&RESULT_CACHE, b"write_zero");
+            RESULT.static_copy()
+        }
+        std::io::ErrorKind::StorageFull => {
+            static RESULT_CACHE: Cache = Cache::new();
+            static RESULT: Value = Value::bytes_const(&RESULT_CACHE, b"storage_full");
+            RESULT.static_copy()
+        }
+        std::io::ErrorKind::NotSeekable => {
+            static RESULT_CACHE: Cache = Cache::new();
+            static RESULT: Value = Value::bytes_const(&RESULT_CACHE, b"not_seekable");
+            RESULT.static_copy()
+        }
+        std::io::ErrorKind::FileTooLarge => {
+            static RESULT_CACHE: Cache = Cache::new();
+            static RESULT: Value = Value::bytes_const(&RESULT_CACHE, b"file_too_large");
+            RESULT.static_copy()
+        }
+        std::io::ErrorKind::ResourceBusy => {
+            static RESULT_CACHE: Cache = Cache::new();
+            static RESULT: Value = Value::bytes_const(&RESULT_CACHE, b"resource_busy");
+            RESULT.static_copy()
+        }
+        std::io::ErrorKind::ExecutableFileBusy => {
+            static RESULT_CACHE: Cache = Cache::new();
+            static RESULT: Value = Value::bytes_const(&RESULT_CACHE, b"executable_file_busy");
+            RESULT.static_copy()
+        }
+        std::io::ErrorKind::Deadlock => {
+            static RESULT_CACHE: Cache = Cache::new();
+            static RESULT: Value = Value::bytes_const(&RESULT_CACHE, b"deadlock");
+            RESULT.static_copy()
+        }
+        std::io::ErrorKind::TooManyLinks => {
+            static RESULT_CACHE: Cache = Cache::new();
+            static RESULT: Value = Value::bytes_const(&RESULT_CACHE, b"too_many_links");
+            RESULT.static_copy()
+        }
+        std::io::ErrorKind::ArgumentListTooLong => {
+            static RESULT_CACHE: Cache = Cache::new();
+            static RESULT: Value = Value::bytes_const(&RESULT_CACHE, b"argument_list_too_long");
+            RESULT.static_copy()
+        }
+        std::io::ErrorKind::Interrupted => {
+            static RESULT_CACHE: Cache = Cache::new();
+            static RESULT: Value = Value::bytes_const(&RESULT_CACHE, b"interrupted");
+            RESULT.static_copy()
+        }
+        std::io::ErrorKind::Unsupported => {
+            static RESULT_CACHE: Cache = Cache::new();
+            static RESULT: Value = Value::bytes_const(&RESULT_CACHE, b"unsupported");
+            RESULT.static_copy()
+        }
+        std::io::ErrorKind::UnexpectedEof => {
+            static RESULT_CACHE: Cache = Cache::new();
+            static RESULT: Value = Value::bytes_const(&RESULT_CACHE, b"unexpected_eof");
+            RESULT.static_copy()
+        }
+        std::io::ErrorKind::OutOfMemory => {
+            static RESULT_CACHE: Cache = Cache::new();
+            static RESULT: Value = Value::bytes_const(&RESULT_CACHE, b"out_of_memory");
+            RESULT.static_copy()
+        }
+        std::io::ErrorKind::Other => {
+            static RESULT_CACHE: Cache = Cache::new();
+            static RESULT: Value = Value::bytes_const(&RESULT_CACHE, b"other");
+            RESULT.static_copy()
+        }
+        _ => {
+            static RESULT_CACHE: Cache = Cache::new();
+            static RESULT: Value = Value::bytes_const(&RESULT_CACHE, b"other_unknown");
+            RESULT.static_copy()
+        }
+    }
 }
 
 impl Io {

@@ -1,5 +1,6 @@
 use super::FuncThunk;
 use super::Value;
+use crate::builtins::Cache;
 
 const fn trim_trailing_zeros(slice: &[u8]) -> &[u8] {
     if let Some((0, slice)) = slice.split_last() {
@@ -14,22 +15,39 @@ macro_rules! cera {
         cera_expr!(($($tt)*))
     };
 }
+macro_rules! count {
+    () => (0usize);
+    ($x:tt $($xs:tt)*) => (1usize + count!($($xs)*))
+}
 macro_rules! cera_expr {
     ({$expr:expr}) => {
-        $expr
+        $expr.static_copy()
     };
     ([$expr:expr]) => {
-        const { Value::bytes_const(trim_trailing_zeros(const {&usize::to_le_bytes($expr)}))}
+        {
+            static CACHE: Cache = Cache::new();
+            Value::bytes_const(&CACHE, trim_trailing_zeros(const {&usize::to_le_bytes($expr)}))
+        }
     };
     ($ident:ident) => {
-        const { Value::bytes_const(unsafe { std::mem::transmute(stringify!($ident)) }) }
+        {
+            static CACHE: Cache = Cache::new();
+            Value::bytes_const(&CACHE, unsafe { std::mem::transmute(stringify!($ident)) })
+        }
     };
     ($literal:literal) => {
-        const { Value::bytes_const($literal) }
+        {
+            static CACHE: Cache = Cache::new();
+            Value::bytes_const(&CACHE, $literal)
+        }
     };
     (($($tt:tt)*)) => {
-        const {
-            Value::aggregate_const(const {&[$(cera_expr!($tt)),*]})
+        {
+            static CACHE: Cache = Cache::new();
+            static DATA: [Value; count!($($tt)*)] = [$(cera_expr!($tt)),*];
+            Value::aggregate_const(&CACHE, {
+                &DATA
+            })
         }
     }
 }
@@ -41,34 +59,34 @@ impl BuiltinImport {
     pub(super) fn poll(self, value: Value) -> FuncThunk {
         FuncThunk::Done {
             value: match &**value.as_bytes() {
-                b"builtin_eval_func" => BUILTIN_EVAL_FUNC,
-                b"aggr_map" => AGGR_MAP,
-                b"aggr_slice_get" => AGGR_SLICE_GET,
-                b"aggr_slice_try_get" => AGGR_SLICE_TRY_GET,
-                b"bool_then" => BOOL_THEN,
-                b"bool_then_some" => BOOL_THEN_SOME,
-                b"some_new" => SOME_NEW,
-                b"none" => NONE,
-                b"pipe" => PIPE,
-                b"compose" => COMPOSE,
-                b"bool_not" => BOOL_NOT,
-                b"aggr_slice_new" => AGGR_SLICE_NEW,
-                b"aggr_slice_buf" => AGGR_SLICE_BUF,
-                b"aggr_slice_try_set" => AGGR_SLICE_TRY_SET,
-                b"aggr_slice_set" => AGGR_SLICE_SET,
-                b"aggr_slice_len" => AGGR_SLICE_LEN,
-                b"aggr_slice_is_empty" => AGGR_SLICE_IS_EMPTY,
-                b"aggr_slice_map_fold" => AGGR_SLICE_MAP_FOLD,
-                b"aggr_slice_map" => AGGR_SLICE_MAP,
-                b"aggr_slice_fold" => AGGR_SLICE_FOLD,
-                b"aggr_vec_slice" => AGGR_VEC_SLICE,
-                b"min" => MIN,
-                b"max" => MAX,
-                b"true" => TRUE,
-                b"false" => FALSE,
-                b"cmp_less" => CMP_LESS,
-                b"cmp_equal" => CMP_EQUAL,
-                b"cmp_greater" => CMP_GREATER,
+                b"builtin_eval_func" => BUILTIN_EVAL_FUNC.static_copy(),
+                b"aggr_map" => AGGR_MAP.static_copy(),
+                b"aggr_slice_get" => AGGR_SLICE_GET.static_copy(),
+                b"aggr_slice_try_get" => AGGR_SLICE_TRY_GET.static_copy(),
+                b"bool_then" => BOOL_THEN.static_copy(),
+                b"bool_then_some" => BOOL_THEN_SOME.static_copy(),
+                b"some_new" => SOME_NEW.static_copy(),
+                b"none" => NONE.static_copy(),
+                b"pipe" => PIPE.static_copy(),
+                b"compose" => COMPOSE.static_copy(),
+                b"bool_not" => BOOL_NOT.static_copy(),
+                b"aggr_slice_new" => AGGR_SLICE_NEW.static_copy(),
+                b"aggr_slice_buf" => AGGR_SLICE_BUF.static_copy(),
+                b"aggr_slice_try_set" => AGGR_SLICE_TRY_SET.static_copy(),
+                b"aggr_slice_set" => AGGR_SLICE_SET.static_copy(),
+                b"aggr_slice_len" => AGGR_SLICE_LEN.static_copy(),
+                b"aggr_slice_is_empty" => AGGR_SLICE_IS_EMPTY.static_copy(),
+                b"aggr_slice_map_fold" => AGGR_SLICE_MAP_FOLD.static_copy(),
+                b"aggr_slice_map" => AGGR_SLICE_MAP.static_copy(),
+                b"aggr_slice_fold" => AGGR_SLICE_FOLD.static_copy(),
+                b"aggr_vec_slice" => AGGR_VEC_SLICE.static_copy(),
+                b"min" => MIN.static_copy(),
+                b"max" => MAX.static_copy(),
+                b"true" => TRUE.static_copy(),
+                b"false" => FALSE.static_copy(),
+                b"cmp_less" => CMP_LESS.static_copy(),
+                b"cmp_equal" => CMP_EQUAL.static_copy(),
+                b"cmp_greater" => CMP_GREATER.static_copy(),
                 _ => panic!("invalid builtin_import argument: {value}"),
             },
         }
@@ -87,7 +105,7 @@ impl BuiltinImport {
 // 3: evaluatable (call (ATOM_VALUE_TO_EVALUATABLE arg))
 // 4: builtin_eval evaluatable
 #[rustfmt::skip]
-pub const BUILTIN_EVAL_FUNC: Value = cera!(
+pub static BUILTIN_EVAL_FUNC: Value = cera!(
     ({ ATOM_VALUE_TO_EVALUATABLE })
     (
         (call ([1] [2]))
@@ -108,7 +126,7 @@ pub const BUILTIN_EVAL_FUNC: Value = cera!(
 // 10: type == "aggregate"
 // if 10 (call (AGGR_MAP (value self)))) else (identity value)
 #[rustfmt::skip]
-const ATOM_VALUE_TO_EVALUATABLE: Value = cera!(
+static ATOM_VALUE_TO_EVALUATABLE: Value = cera!(
     ([0] [1] {AGGR_MAP} aggregate call identity)
     (
         (aggr_get ([7] [1]))
@@ -136,7 +154,7 @@ const ATOM_VALUE_TO_EVALUATABLE: Value = cera!(
 // 10: slice2 (call (AGGR_SLICE_MAP (slice func)))
 // call (AGGR_SLICE_BUF slice2)
 #[rustfmt::skip]
-const AGGR_MAP: Value = cera!(
+static AGGR_MAP: Value = cera!(
     (
         [0]
         [1]
@@ -161,7 +179,7 @@ const AGGR_MAP: Value = cera!(
 // 3: len (aggr_len arg)
 // identity (0 len arg)
 #[rustfmt::skip]
-const AGGR_SLICE_NEW: Value = cera!(
+static AGGR_SLICE_NEW: Value = cera!(
     ([0])
     (
         (aggr_len [2])
@@ -176,7 +194,7 @@ const AGGR_SLICE_NEW: Value = cera!(
 // 2: arg
 // aggr_get (arg 2)
 #[rustfmt::skip]
-const AGGR_SLICE_BUF: Value = cera!(
+static AGGR_SLICE_BUF: Value = cera!(
     ([2])
     (
         (aggr_get ([2] [1]))
@@ -198,7 +216,7 @@ const AGGR_SLICE_BUF: Value = cera!(
 // 10: is_some (bytes_eq ("some" get_res))
 // if (is_some ("aggr_get" (res, 1)) [5])
 #[rustfmt::skip]
-const AGGR_SLICE_GET: Value = cera!(
+static AGGR_SLICE_GET: Value = cera!(
     (
         [0]
         [1]
@@ -238,7 +256,7 @@ const AGGR_SLICE_GET: Value = cera!(
 // 15: is_in_bounds (eq (0 bounds_check))
 // call (BOOL_THEN (is_in_bounds (aggr_get (buf idx_real))))
 #[rustfmt::skip]
-const AGGR_SLICE_TRY_GET: Value = cera!(
+static AGGR_SLICE_TRY_GET: Value = cera!(
     ([0] [1] [2] {BOOL_THEN} aggr_get)
     (
         (aggr_get ([6] [1]))
@@ -270,7 +288,7 @@ const AGGR_SLICE_TRY_GET: Value = cera!(
 // 11: is_ret_value_some (bytes_eq (some ret_value_variant))
 // if (is_ret_value_some [5] ("aggr_get" (res, 0)))
 #[rustfmt::skip]
-const AGGR_SLICE_SET: Value = cera!(
+static AGGR_SLICE_SET: Value = cera!(
     (
         [0]
         [1]
@@ -317,7 +335,7 @@ const AGGR_SLICE_SET: Value = cera!(
 // 21: value_rem (call (BOOL_THEN_SOME (is_not_in_bounds value)))
 // identity ((start end buf2) value_rem)
 #[rustfmt::skip]
-const AGGR_SLICE_TRY_SET: Value = cera!(
+static AGGR_SLICE_TRY_SET: Value = cera!(
     (
         [0]
         [1]
@@ -358,7 +376,7 @@ const AGGR_SLICE_TRY_SET: Value = cera!(
 // 5: end (aggr_get (arg 1))
 // sub (end start)
 #[rustfmt::skip]
-const AGGR_SLICE_LEN: Value = cera!(
+static AGGR_SLICE_LEN: Value = cera!(
     ([0] [1])
     (
         (aggr_get ([3] [1]))
@@ -377,7 +395,7 @@ const AGGR_SLICE_LEN: Value = cera!(
 // 5: end (aggr_get (arg 1))
 // eq (start end)
 #[rustfmt::skip]
-const AGGR_SLICE_IS_EMPTY: Value = cera!(
+static AGGR_SLICE_IS_EMPTY: Value = cera!(
     ([0] [1])
     (
         (aggr_get ([3] [1]))
@@ -400,7 +418,7 @@ const AGGR_SLICE_IS_EMPTY: Value = cera!(
 // 9: slice_mapped2 (aggr_set (slice_mapped 0 init_start))
 // aggr_set (value2 0 slice_mapped_2)
 #[rustfmt::skip]
-const AGGR_SLICE_MAP_FOLD: Value = cera!(
+static AGGR_SLICE_MAP_FOLD: Value = cera!(
     (
         [0]
         {AGGR_SLICE_MAP_FOLD_INNER}
@@ -435,7 +453,7 @@ const AGGR_SLICE_MAP_FOLD: Value = cera!(
 //      (call (PIPE ((call (AGGR_SLICE_MAP_FOLD_STEP arg)) self)))
 // )
 #[rustfmt::skip]
-const AGGR_SLICE_MAP_FOLD_INNER: Value = cera!(
+static AGGR_SLICE_MAP_FOLD_INNER: Value = cera!(
     (
         [0]
         [1]
@@ -479,7 +497,7 @@ const AGGR_SLICE_MAP_FOLD_INNER: Value = cera!(
 // 18: slice4 (aggr_set (slice3 0 start2))
 // identity (slice4 acc2 func)
 #[rustfmt::skip]
-const AGGR_SLICE_MAP_FOLD_STEP: Value = cera!(
+static AGGR_SLICE_MAP_FOLD_STEP: Value = cera!(
     (
         [0]
         [1]
@@ -521,7 +539,7 @@ const AGGR_SLICE_MAP_FOLD_STEP: Value = cera!(
 // 12: res (call (AGGR_SLICE_MAP_FOLD (slice () func3)))
 // aggr_get (res 0)
 #[rustfmt::skip]
-const AGGR_SLICE_MAP: Value = cera!(
+static AGGR_SLICE_MAP: Value = cera!(
     (
         [0]
         [1]
@@ -559,7 +577,7 @@ const AGGR_SLICE_MAP: Value = cera!(
 //      (call (PIPE ((call (AGGR_SLICE_FOLD_STEP arg)) self)))
 // )
 #[rustfmt::skip]
-const AGGR_SLICE_FOLD: Value = cera!(
+static AGGR_SLICE_FOLD: Value = cera!(
     (
         [0]
         [1]
@@ -600,7 +618,7 @@ const AGGR_SLICE_FOLD: Value = cera!(
 // 16: slice2 (aggr_set (slice 0 start2))
 // aggr_set (arg4 0 slice2)
 #[rustfmt::skip]
-const AGGR_SLICE_FOLD_STEP: Value = cera!(
+static AGGR_SLICE_FOLD_STEP: Value = cera!(
     ([0] [1] [2] {AGGR_SLICE_GET})
     (
         (aggr_get ([5] [1]))
@@ -618,11 +636,11 @@ const AGGR_SLICE_FOLD_STEP: Value = cera!(
     )
 );
 
-pub const TRUE: Value = cera_expr!([1]);
-pub const FALSE: Value = cera_expr!([0]);
-pub const CMP_LESS: Value = cera_expr!([0]);
-pub const CMP_EQUAL: Value = cera_expr!([1]);
-pub const CMP_GREATER: Value = cera_expr!([2]);
+pub static TRUE: Value = cera_expr!([1]);
+pub static FALSE: Value = cera_expr!([0]);
+pub static CMP_LESS: Value = cera_expr!([0]);
+pub static CMP_EQUAL: Value = cera_expr!([1]);
+pub static CMP_GREATER: Value = cera_expr!([2]);
 
 // bool -> !bool
 //
@@ -633,7 +651,7 @@ pub const CMP_GREATER: Value = cera_expr!([2]);
 // 4: arg
 // if (arg (identity FALSE) (identity TRUE))
 #[rustfmt::skip]
-const BOOL_NOT: Value = cera!(
+static BOOL_NOT: Value = cera!(
     ({TRUE} {FALSE} identity)
     (
         (if ([4] ([3] [2]) ([3] [1])))
@@ -655,7 +673,7 @@ const BOOL_NOT: Value = cera!(
 // 10: expr (aggr_get (arg 1))
 // if (bool (call (PIPE (expr SOME_NEW))) (identity NONE))
 #[rustfmt::skip]
-const BOOL_THEN: Value = cera!(
+static BOOL_THEN: Value = cera!(
     (
         [0]
         [1]
@@ -686,7 +704,7 @@ const BOOL_THEN: Value = cera!(
 // 6: arg2 (aggr_set (arg 1 ("identity" value)))
 // call (BOOL_THEN arg2)
 #[rustfmt::skip]
-const BOOL_THEN_SOME: Value = cera!(
+static BOOL_THEN_SOME: Value = cera!(
     (
         [1]
         {BOOL_THEN}
@@ -706,7 +724,7 @@ const BOOL_THEN_SOME: Value = cera!(
 // 2: arg
 // identity (some arg)
 #[rustfmt::skip]
-const SOME_NEW: Value = cera!(
+static SOME_NEW: Value = cera!(
     (
         some
     )
@@ -716,7 +734,7 @@ const SOME_NEW: Value = cera!(
 );
 
 #[rustfmt::skip]
-const NONE: Value = cera!(
+static NONE: Value = cera!(
     none ()
 );
 
@@ -731,7 +749,7 @@ const NONE: Value = cera!(
 // 6: res
 // call (func res)
 #[rustfmt::skip]
-const PIPE: Value = cera!(
+static PIPE: Value = cera!(
     ([0] [1])
     (
         (aggr_get ([3] [1]))
@@ -758,7 +776,7 @@ const PIPE: Value = cera!(
 //  (call (2 4))
 // ))
 #[rustfmt::skip]
-const COMPOSE: Value = cera!(
+static COMPOSE: Value = cera!(
     ([0] [1] [2] [3] [4] call)
     (
         (aggr_get ([7] [1]))
@@ -771,12 +789,12 @@ const COMPOSE: Value = cera!(
 );
 
 #[rustfmt::skip]
-const AGGR_VEC_INIT: Value = cera!(
+static AGGR_VEC_INIT: Value = cera!(
     [0] ()
 );
 
 #[rustfmt::skip]
-const AGGR_VEC_PUSH: Value = cera!();
+static AGGR_VEC_PUSH: Value = cera!();
 
 // ((len buf) desired_len) -> (len buf)
 //
@@ -792,7 +810,7 @@ const AGGR_VEC_PUSH: Value = cera!();
 //  should_resize (eq (len_cmp 0))
 //  if (should_resize () (identity (len buf)))
 #[rustfmt::skip]
-const AGGR_VEC_RESERVE: Value = cera!(
+static AGGR_VEC_RESERVE: Value = cera!(
 
 );
 
@@ -810,11 +828,11 @@ const AGGR_VEC_RESERVE: Value = cera!(
 //  min_new_len (shl (len 1))
 //  new_len (MAX (desired_len min_new_len))
 //  new_buf (aggr_make new_len)
-const AGGR_VEC_RESIZE: Value = cera!();
+static AGGR_VEC_RESIZE: Value = cera!();
 
 // (len buf) -> ((len buf) value)
 #[rustfmt::skip]
-const AGGR_VEC_POP: Value = cera!(
+static AGGR_VEC_POP: Value = cera!(
 );
 
 // (len buf) -> (0 len buf)
@@ -827,7 +845,7 @@ const AGGR_VEC_POP: Value = cera!(
 // 5: buf (aggr_get (arg 1))
 // identity (0 len buf)
 #[rustfmt::skip]
-const AGGR_VEC_SLICE: Value = cera!(
+static AGGR_VEC_SLICE: Value = cera!(
     ([0] [1])
     (
         (aggr_get ([3] [1]))
@@ -837,10 +855,10 @@ const AGGR_VEC_SLICE: Value = cera!(
 );
 
 #[rustfmt::skip]
-const AGGR_VEC_BORROW_SLICE: Value = cera!();
+static AGGR_VEC_BORROW_SLICE: Value = cera!();
 
 #[rustfmt::skip]
-const AGGR_VEC_UNBORROW_SLICE: Value = cera!();
+static AGGR_VEC_UNBORROW_SLICE: Value = cera!();
 
 // (bytes bytes) -> bytes
 // 0: self
@@ -854,7 +872,7 @@ const AGGR_VEC_UNBORROW_SLICE: Value = cera!();
 // 8: lhs_smaller (eq (ord 0))
 // if (lhs_smaller (identity lhs) (identity rhs))
 #[rustfmt::skip]
-const MIN: Value = cera!(
+static MIN: Value = cera!(
     ([0] [1] identity)
     (
         (aggr_get ([4] [1]))
@@ -879,7 +897,7 @@ const MIN: Value = cera!(
 // 8: lhs_smaller (eq (ord 0))
 // if (lhs_smaller (identity rhs) (identity lhs))
 #[rustfmt::skip]
-const MAX: Value = cera!(
+static MAX: Value = cera!(
     ([0] [1] identity)
     (
         (aggr_get ([4] [1]))
@@ -894,4 +912,4 @@ const MAX: Value = cera!(
 );
 
 #[rustfmt::skip]
-const FUNC_SYNTAX_DESUGAR_BASIC: Value = cera!();
+static FUNC_SYNTAX_DESUGAR_BASIC: Value = cera!();

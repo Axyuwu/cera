@@ -1,14 +1,18 @@
 mod chain2;
 
-use crate::builtins::{
-    builtin_values::{CMP_EQUAL, CMP_GREATER, CMP_LESS},
-    get_usize,
+use crate::{
+    builtins::{
+        builtin_values::{CMP_EQUAL, CMP_GREATER, CMP_LESS},
+        get_usize,
+    },
+    utils::sync::cache_arc::CacheArcCache,
 };
 use std::{
     cmp::Ordering,
     ops::{Deref, DerefMut},
-    sync::Arc,
 };
+
+use crate::utils::sync::cache_arc::CacheArc as Arc;
 
 use super::{
     builtin_values::{FALSE, TRUE},
@@ -18,15 +22,15 @@ use super::{
 /// A byte storage which inlines small amounts of data, and otherwise can be freely
 /// converted to an Arc
 #[repr(u8)]
-enum ByteStorage {
+enum ByteStorage<C> {
     Inline {
         len: u8,
         bytes: [u8; 22],
     },
     /// Invariant: This pointer is a unique reference to the data of a uniquely owned Arc
-    Arc(*mut [u8]),
+    Arc(Arc<[u8], C>),
 }
-impl ByteStorage {
+impl<C: CacheArcCache> ByteStorage<C> {
     fn new(size: usize) -> Self {
         match size {
             size @ 0..=22 => Self::Inline {
@@ -36,61 +40,52 @@ impl ByteStorage {
             size @ 23.. => Self::Arc(
                 // Why is there no way to do this safely without doing extra allocations?
                 {
-                    let mut arc = Arc::<[u8]>::new_uninit_slice(size);
+                    let mut arc = Arc::<[u8], C>::new_uninit(size);
                     // Each uninit value is visited and written to, therefor making them
                     // initialized
-                    Arc::make_mut(&mut arc).iter_mut().for_each(|byte| {
-                        byte.write(0);
-                    });
-                    // Therefor this pointer points to initialized, data that belongs to an
-                    // Arc, which was just created and without clones which means it is
-                    // unique
-                    Arc::<[_]>::into_raw(arc) as *mut [u8]
+                    unsafe { Arc::mut_unchecked(&mut arc) }
+                        .iter_mut()
+                        .for_each(|byte| {
+                            byte.write(0);
+                        });
+                    // Therefor this is safe
+                    unsafe { Arc::<_, _>::cast_slice(arc) }
                 },
             ),
         }
     }
 }
-impl AsRef<[u8]> for ByteStorage {
+impl<C> AsRef<[u8]> for ByteStorage<C> {
     fn as_ref(&self) -> &[u8] {
         match self {
             Self::Inline { len, bytes } => &bytes[0..(*len as usize)],
-            Self::Arc(bytes) => unsafe {
-                // This is safe because of the invariant that bytes points to the data of
-                // an Arc
-                &**bytes
-            },
+            Self::Arc(bytes) => bytes,
         }
     }
 }
-impl Deref for ByteStorage {
+impl<C> Deref for ByteStorage<C> {
     type Target = [u8];
 
     fn deref(&self) -> &Self::Target {
         self.as_ref()
     }
 }
-impl DerefMut for ByteStorage {
+impl<C: CacheArcCache> DerefMut for ByteStorage<C> {
     fn deref_mut(&mut self) -> &mut Self::Target {
         match self {
             ByteStorage::Inline { len, bytes } => &mut bytes[0..(*len as usize)],
             ByteStorage::Arc(bytes) => unsafe {
-                // This is safe because of the invariant that bytes points to the data of
-                // a uniquely owned Arc
-                &mut **bytes
+                // This is safe because of the invariant that bytes is uniquely owning
+                Arc::mut_unchecked(bytes)
             },
         }
     }
 }
-impl Into<Arc<[u8]>> for ByteStorage {
-    fn into(self) -> Arc<[u8]> {
+impl<C: CacheArcCache> Into<Arc<[u8], C>> for ByteStorage<C> {
+    fn into(self) -> Arc<[u8], C> {
         match self {
             Self::Inline { len, bytes } => bytes[0..(len as usize)].into(),
-            Self::Arc(bytes) => unsafe {
-                // This is safe because of the invariant that bytes points to the data of
-                // an Arc
-                Arc::from_raw(bytes)
-            },
+            Self::Arc(bytes) => bytes,
         }
     }
 }
@@ -192,18 +187,18 @@ impl Arithmetic {
 
                     Value::bytes_move(res)
                 }
-                Self::Div => Value::bytes_move(div_full(value).0),
-                Self::Rem => Value::bytes_move(div_full(value).1),
+                Self::Div => Value::bytes_move(div_full::<_, ()>(value).0),
+                Self::Rem => Value::bytes_move(div_full::<(), _>(value).1),
                 Self::DivFull => Value::aggregate_move(
-                    Into::<[ByteStorage; 2]>::into(div_full(value)).map(Value::bytes_move),
+                    Into::<[ByteStorage<_>; 2]>::into(div_full(value)).map(Value::bytes_move),
                 ),
                 Self::Cmp => {
                     use Ordering::*;
                     fn ord_to_val(ord: Ordering) -> Value {
                         match ord {
-                            Less => CMP_LESS,
-                            Equal => CMP_EQUAL,
-                            Greater => CMP_GREATER,
+                            Less => CMP_LESS.static_copy(),
+                            Equal => CMP_EQUAL.static_copy(),
+                            Greater => CMP_GREATER.static_copy(),
                         }
                     }
 
@@ -266,8 +261,8 @@ impl Arithmetic {
                     let [lhs, rhs] = args.each_ref().map(|e| trim_zeros(e));
 
                     match lhs == rhs {
-                        true => TRUE,
-                        false => FALSE,
+                        true => TRUE.static_copy(),
+                        false => FALSE.static_copy(),
                     }
                 }
             },
@@ -310,7 +305,9 @@ fn binary_bytewise(value: Value, func: impl Fn(u8, u8) -> u8) -> Value {
 }
 
 // (Quotient, Remainder)
-fn div_full(value: Value) -> (ByteStorage, ByteStorage) {
+fn div_full<C1: CacheArcCache, C2: CacheArcCache>(
+    value: Value,
+) -> (ByteStorage<C1>, ByteStorage<C2>) {
     let args = get_args(value).map(Value::into_bytes);
     let [dividend, divisor] = args.each_ref();
 

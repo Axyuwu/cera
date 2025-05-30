@@ -19,7 +19,7 @@ impl<T: Debug> Debug for SpinMutex<T> {
         } else {
             d.field("data", &format_args!("<locked>"));
         }
-        d.finish_non_exhaustive()
+        d.finish()
     }
 }
 
