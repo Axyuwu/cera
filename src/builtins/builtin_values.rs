@@ -206,33 +206,28 @@ static AGGR_SLICE_BUF: Value = cera!(
 // 0: self
 // 1: 0
 // 2: 1
-// 3: AGGR_SLICE_TRY_GET
-// 4: some
-// 5: (process_abort "index out of bound of slice")
-// 6: aggr_get
-// 7: arg
-// 8: res ("call" (SLICE_TRY_GET, arg))
-// 9: get_res ("aggr_get" (res, 0))
-// 10: is_some (bytes_eq ("some" get_res))
-// if (is_some ("aggr_get" (res, 1)) [5])
+// 3: 2
+// 4: arg
+// 5: slice (aggr_get (arg 0))
+// 6: idx (aggr_get (arg 1))
+// 7: start (aggr_get (slice 0))
+// 8: buf (aggr_get (slice 2))
+// 9: idx_real (add (idx start))
+// aggr_get (buf idx_real)
 #[rustfmt::skip]
 static AGGR_SLICE_GET: Value = cera!(
     (
         [0]
         [1]
-        {AGGR_SLICE_TRY_GET}
-        some
-        (process_abort b"index out of bound of slice")
-        aggr_get
+        [2]
     )
     (
-        (call ([3] [7]))
-        (aggr_get ([8] [1]))
-        (bytes_eq ([4] [9]))
-        (if ([10]
-            ([6] ([8] [2]))
-            [5]
-        ))
+        (aggr_get ([4] [1]))
+        (aggr_get ([4] [2]))
+        (aggr_get ([5] [1]))
+        (aggr_get ([5] [3]))
+        (add ([6] [7]))
+        (aggr_get ([8] [9]))
     )
 );
 
@@ -277,35 +272,34 @@ static AGGR_SLICE_TRY_GET: Value = cera!(
 // 0: self
 // 1: 0
 // 2: 1
-// 3: AGGR_SLICE_TRY_SET
-// 4: some
-// 5: (process_abort "index out of bound of slice")
-// 6: aggr_get
-// 7: arg
-// 8: res (call (SLICE_TRY_SET, arg))
-// 9: ret_value (aggr_get (res, 1))
-// 10: ret_value_variant (aggr_get (ret_value, 0))
-// 11: is_ret_value_some (bytes_eq (some ret_value_variant))
-// if (is_ret_value_some [5] ("aggr_get" (res, 0)))
+// 3: 2
+// 4: arg
+// 5: slice (aggr_get (arg 0))
+// 6: idx (aggr_get (arg 1))
+// 7: value (aggr_get (arg 2))
+// 8: start (aggr_get (slice 0))
+// 9: end (agg_get (slice 1))
+// 10: buf (aggr_get (slice 2))
+// 11: idx_real (add (idx start))
+// 12: buf2 (aggr_set (buf idx_real value))
+// identity (start end buf2)
 #[rustfmt::skip]
 static AGGR_SLICE_SET: Value = cera!(
     (
         [0]
         [1]
-        {AGGR_SLICE_TRY_SET}
-        some
-        (process_abort b"index out of bound of slice")
-        aggr_get
+        [2]
     )
     (
-        (call ([3] [7]))
-        (aggr_get ([8] [2]))
-        (aggr_get ([9] [1]))
-        (bytes_eq ([4] [10]))
-        (if ([11]
-            [5]
-            ([6] ([8] [1]))
-        ))
+        (aggr_get ([4] [1]))
+        (aggr_get ([4] [2]))
+        (aggr_get ([4] [3]))
+        (aggr_get ([5] [1]))
+        (aggr_get ([5] [2]))
+        (aggr_get ([5] [3]))
+        (add ([6] [8]))
+        (aggr_set ([10] [11] [7]))
+        (identity ([8] [9] [12]))
     )
 );
 
