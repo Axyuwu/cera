@@ -9,11 +9,10 @@ use resources::{Io, Thread};
 use crate::builtins::get_u128;
 use crate::utils::sync::sync_map::{SyncMap, SyncMapKey};
 
-use super::eval;
-use super::get_args;
 use super::get_usize;
 use super::FuncThunk;
 use super::Value;
+use super::{get_args, BuiltinFunc};
 
 #[derive(Debug)]
 pub struct World {
@@ -373,7 +372,15 @@ impl WorldIo {
                 }),
                 WorldIo::ThreadSleep => todo!(),
                 WorldIo::ThreadSpawn => world_map(world, value, |value| {
-                    world.new_thread(|world| eval(value, world)).into()
+                    world
+                        .new_thread(|mut world| {
+                            FuncThunk::Step {
+                                func: BuiltinFunc::BuiltinEval,
+                                value,
+                            }
+                            .eval(&mut world)
+                        })
+                        .into()
                 }),
                 WorldIo::ThreadYieldNow => todo!(),
                 WorldIo::ThreadJoin => world_map_io_no_arg(world, value, Io::thread_join),
