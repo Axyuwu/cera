@@ -28,10 +28,11 @@ pub trait SliceStorage<T>: Sized {
     fn eq(&self, rhs: &[T]) -> bool;
 }
 
+const U8_SLICE_STORAGE_SIZE: usize = 16;
 #[derive(Debug, Clone)]
 pub struct U8SliceStorage {
-    len: u8,
-    storage: [u8; 15],
+    len: usize,
+    storage: [u8; U8_SLICE_STORAGE_SIZE],
 }
 
 impl SliceStorage<u8> for U8SliceStorage {
@@ -44,13 +45,13 @@ impl SliceStorage<u8> for U8SliceStorage {
     }
 
     fn try_new(slice: &[u8]) -> Option<Self> {
-        if slice.len() > 15 {
+        if slice.len() > U8_SLICE_STORAGE_SIZE {
             None
         } else {
-            let mut storage = [0; 15];
+            let mut storage = [0; U8_SLICE_STORAGE_SIZE];
             storage[0..(slice.len())].copy_from_slice(slice);
             Some(Self {
-                len: slice.len() as u8,
+                len: slice.len(),
                 storage,
             })
         }
@@ -86,6 +87,7 @@ impl HasSliceStorage for Value {
     type Storage = Infallible;
 }
 impl HasSliceStorage for u8 {
+    //type Storage = Infallible;
     type Storage = U8SliceStorage;
 }
 
@@ -862,8 +864,7 @@ impl Let {
             }
         }
     }
-    fn init(mut func: Value) -> Self {
-        func.gen_cache();
+    fn init(func: Value) -> Self {
         let res = func.cache().generate(|| CacheInner {
             func: Arc::new(LetProcessed::process_func(&func)),
         });
