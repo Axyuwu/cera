@@ -116,3 +116,19 @@ impl<T> CacheLock<T> {
         }
     }
 }
+
+pub trait Initializer {
+    type Value;
+    fn initialize() -> Self::Value;
+}
+
+pub struct InitLock<T: Initializer>(CacheLock<T::Value>);
+
+impl<T: Initializer> InitLock<T> {
+    pub fn get(&self) -> &T::Value {
+        self.0.generate(T::initialize)
+    }
+    pub const fn new() -> Self {
+        Self(CacheLock::new())
+    }
+}

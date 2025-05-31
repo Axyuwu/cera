@@ -21,6 +21,24 @@ pub struct World {
     curr_thread: Cell<SyncMapKey>,
 }
 
+pub trait AsWorld {
+    fn as_world(&mut self) -> &mut World;
+}
+
+impl AsWorld for World {
+    fn as_world(&mut self) -> &mut World {
+        self
+    }
+}
+
+#[derive(Debug)]
+pub struct PureWorld;
+impl AsWorld for PureWorld {
+    fn as_world(&mut self) -> &mut World {
+        panic!("cannot access world in pure world")
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct WorldGeneration(u128);
 
@@ -294,7 +312,8 @@ impl WorldIo {
             Self::HintSpinLoop => "hint_spin_loop",
         }
     }
-    pub fn poll(self, value: Value, world: &mut World) -> FuncThunk {
+    pub fn poll(self, value: Value, world: &mut impl AsWorld) -> FuncThunk {
+        let world = world.as_world();
         FuncThunk::Done {
             value: match self {
                 WorldIo::IoRead => world_map_io(world, value, |io, mut value| {

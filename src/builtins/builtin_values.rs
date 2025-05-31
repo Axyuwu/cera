@@ -10,6 +10,23 @@ const fn trim_trailing_zeros(slice: &[u8]) -> &[u8] {
     }
 }
 
+macro_rules! cached_eval {
+    ($tt:tt) => {{
+        use super::eval_pure;
+        use crate::utils::sync::cache_lock::{InitLock, Initializer};
+        struct Init;
+        impl Initializer for Init {
+            type Value = Value;
+            fn initialize() -> Self::Value {
+                dbg!();
+                eval_pure($tt.static_copy())
+            }
+        }
+        static CACHE: InitLock<Init> = InitLock::new();
+        CACHE.get().clone()
+    }};
+}
+
 macro_rules! cera {
     ($($tt:tt)*) => {
         cera_expr!(($($tt)*))

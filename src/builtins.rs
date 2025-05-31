@@ -12,6 +12,8 @@ use arithemtic::Arithmetic;
 use builtin_values::BuiltinImport;
 use builtin_values::FALSE;
 use builtin_values::TRUE;
+use world::AsWorld;
+use world::PureWorld;
 use world::World;
 use world::WorldIo;
 
@@ -35,6 +37,14 @@ pub fn eval_builtin(atom: Atom) -> Value {
         value: Value::aggregate_move([builtin_values::BUILTIN_EVAL_FUNC.static_copy(), atom]),
     }
     .eval(&mut world)
+}
+
+pub fn eval_pure(value: Value) -> Value {
+    FuncThunk::Step {
+        func: BuiltinFunc::BuiltinEval,
+        value,
+    }
+    .eval(&mut PureWorld)
 }
 
 fn atom_to_val(atom: Atom) -> Value {
@@ -67,7 +77,7 @@ enum FuncThunk {
 }
 
 impl FuncThunk {
-    fn eval(mut self, world: &mut World) -> Value {
+    fn eval(mut self, world: &mut impl AsWorld) -> Value {
         loop {
             match self {
                 FuncThunk::Step { func, value } => self = func.poll(value, world),
@@ -95,7 +105,7 @@ enum BuiltinFunc {
 
 impl BuiltinFunc {
     #[inline]
-    fn poll(self, value: Value, world: &mut World) -> FuncThunk {
+    fn poll(self, value: Value, world: &mut impl AsWorld) -> FuncThunk {
         use FuncThunk::*;
         match self {
             Self::BuiltinEval => Self::poll_builtin_eval(value),
@@ -119,7 +129,7 @@ impl BuiltinFunc {
             value,
         }
     }
-    fn poll_call(value: Value, world: &mut World) -> FuncThunk {
+    fn poll_call(value: Value, world: &mut impl AsWorld) -> FuncThunk {
         let [func, arg] = get_args(value);
         Let::init(func).poll(arg, world)
     }
@@ -308,7 +318,7 @@ impl LetProcessed {
 }
 
 impl Let {
-    fn poll(mut self, mut value: Value, world: &mut World) -> FuncThunk {
+    fn poll(mut self, mut value: Value, world: &mut impl AsWorld) -> FuncThunk {
         loop {
             let Let {
                 idx,
