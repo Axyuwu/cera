@@ -156,6 +156,7 @@ fn parse_escape<'t>(str: &'t str, buf: &mut Vec<u8>) -> ParseResult<&'t str> {
                     '6' => 0x6,
                     '7' => 0x7,
                     '8' => 0x8,
+                    '9' => 0x9,
                     'a' | 'A' => 0xA,
                     'b' | 'B' => 0xB,
                     'c' | 'C' => 0xC,

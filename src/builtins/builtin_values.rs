@@ -18,7 +18,6 @@ macro_rules! cached_eval {
         impl Initializer for Init {
             type Value = Value;
             fn initialize() -> Self::Value {
-                dbg!();
                 eval_pure($tt.static_copy())
             }
         }
@@ -96,6 +95,7 @@ impl BuiltinImport {
                 b"aggr_slice_map_fold" => AGGR_SLICE_MAP_FOLD.static_copy(),
                 b"aggr_slice_map" => AGGR_SLICE_MAP.static_copy(),
                 b"aggr_slice_fold" => AGGR_SLICE_FOLD.static_copy(),
+                b"aggr_slice_copy" => AGGR_SLICE_COPY.static_copy(),
                 b"aggr_vec_slice" => AGGR_VEC_SLICE.static_copy(),
                 b"min" => MIN.static_copy(),
                 b"max" => MAX.static_copy(),
@@ -104,6 +104,8 @@ impl BuiltinImport {
                 b"cmp_less" => CMP_LESS.static_copy(),
                 b"cmp_equal" => CMP_EQUAL.static_copy(),
                 b"cmp_greater" => CMP_GREATER.static_copy(),
+                b"type_aggr" => TYPE_AGGR.static_copy(),
+                b"type_bytes" => TYPE_BYTES.static_copy(),
                 _ => panic!("invalid builtin_import argument: {value}"),
             },
         }
@@ -610,6 +612,7 @@ static AGGR_SLICE_FOLD: Value = cera!(
 );
 
 // (slice{T} acc{A} func{(A T) -> A}) -> (slice{T#len-=1} acc{A} func{(A T) -> A})
+//
 // 0: self
 // 1: 0
 // 2: 1
@@ -647,11 +650,114 @@ static AGGR_SLICE_FOLD_STEP: Value = cera!(
     )
 );
 
+// (src dst) -> dst
+//
+// 0: self
+// 1: 0
+// 2: 1
+// 3: AGGR_SLICE_COPY_INNER
+// 4: arg
+// 5: src (aggr_get (arg 0))
+// 6: dst (aggr_get (arg 1))
+// 7: start (aggr_get (dst 0))
+// 8: dst2 (call (AGGR_SLICE_COPY_INNER (src dst)))
+// aggr_set (dst2 0 start)
+#[rustfmt::skip]
+static AGGR_SLICE_COPY: Value = cera!(
+    ([0] [1] {AGGR_SLICE_COPY_INNER})
+    (
+        (aggr_get ([4] [1]))
+        (aggr_get ([4] [2]))
+        (aggr_get ([6] [1]))
+        (call ([3] ([5] [6])))
+        (aggr_set ([8] [1] [7]))
+    )
+);
+
+// (src dst) -> dst
+//
+// 0: self
+// 1: 1
+// 2: AGGR_SLICE_IS_EMPTY
+// 3: COMPOSE
+// 4: AGGR_SLICE_COPY_STEP
+// 5: identity
+// 6: call
+// 7: arg
+// 8: dst (aggr_get (arg 1))
+// 9: is_empty (call (AGGR_SLICE_IS_EMPTY dst))
+// 10: tail (call (COMPOSE (AGGR_SLICE_COPY_STEP self)))
+// if (is_empty (identity dst) (call (tail arg)))
+#[rustfmt::skip]
+static AGGR_SLICE_COPY_INNER: Value = cera!(
+    (
+        [1]
+        {AGGR_SLICE_IS_EMPTY}
+        {COMPOSE}
+        {AGGR_SLICE_COPY_STEP}
+        identity
+        call
+    )
+    (
+        (aggr_get ([7] [1]))
+        (call ([2] [8]))
+        (call ([3] ([4] [0])))
+        (if ([9]
+            ([5] [8])
+            ([6] ([10] [7]))
+        ))
+    )
+);
+
+// (src dst) -> (src dst)
+//
+// 0: self
+// 1: 0
+// 2: 1
+// 3: AGGR_SLICE_GET
+// 4: AGGR_SLICE_SET
+// 5: arg
+// 6: src (aggr_get (arg 0))
+// 7: dst (aggr_get (arg 1))
+// 8: elem (call (AGGR_SLICE_GET (src 0)))
+// 9: dst2 (call (AGGR_SLICE_SET (dst 0 elem)))
+// 10: dst_start (aggr_get (dst2 0))
+// 11: dst_start2 (add (dst_start 1))
+// 12: dst3 (aggr_set (dst2 0 dst_start2))
+// 13: src_start (aggr_get (src 0))
+// 14: src_start2 (add (src_start 1))
+// 15: src2 (aggr_set (src 0 src_start2))
+// identity (src2 dst3)
+#[rustfmt::skip]
+static AGGR_SLICE_COPY_STEP: Value = cera!(
+    (
+        [0]
+        [1]
+        {AGGR_SLICE_GET}
+        {AGGR_SLICE_SET}
+    )
+    (
+        (aggr_get ([5] [1]))
+        (aggr_get ([5] [2]))
+        (call ([3] ([6] [1])))
+        (call ([4] ([7] [1] [8])))
+        (aggr_get ([9] [1]))
+        (add ([10] [2]))
+        (aggr_set ([9] [1] [11]))
+        (aggr_get ([6] [1]))
+        (add ([13] [2]))
+        (aggr_set ([6] [1] [14]))
+        (identity ([15] [12]))
+    )
+);
+
 pub static TRUE: Value = cera_expr!([1]);
 pub static FALSE: Value = cera_expr!([0]);
 pub static CMP_LESS: Value = cera_expr!([0]);
 pub static CMP_EQUAL: Value = cera_expr!([1]);
 pub static CMP_GREATER: Value = cera_expr!([2]);
+pub static TYPE_AGGR: Value = cera_expr!(aggr);
+pub static TYPE_BYTES: Value = cera_expr!(bytes);
 
 // bool -> !bool
 //
@@ -773,29 +879,40 @@ static PIPE: Value = cera!(
 // (func1{A->B} func2{B->C}) -> A -> C
 //
 // 0: self
-// 1: 0
-// 2: 1
-// 3: 2
-// 4: 3
-// 5: 4
-// 6: call
-// 7: arg
-// 8: func1
-// 9: func2
-// identity ((func1 func2)(
-//  (call (1 3))
-//  (call (2 4))
-// ))
+// 1: closure
+// 2: COMPOSE_FN
+// 3: arg
+// identity (closure COMPOSE_FN arg)
 #[rustfmt::skip]
 static COMPOSE: Value = cera!(
-    ([0] [1] [2] [3] [4] call)
+    (closure {COMPOSE_FN})
     (
-        (aggr_get ([7] [1]))
-        (aggr_get ([7] [2]))
-        (identity (([8] [9])(
-            ([6] ([2] [4]))
-            ([6] ([3] [5]))
-        )))
+        (identity ([1] [2] [3]))
+    )
+);
+
+// ((func1{A->B} func2{B->C}) A) -> C
+//
+// 0: self
+// 1: 0
+// 2: 1
+// 3: arg
+// 4: captured (aggr_get (arg 0))
+// 5: A (aggr_get (arg 1))
+// 6: func1 (aggr_get (captured 0))
+// 7: func2 (aggr_get (captured 1))
+// 8: B (call (func1 A))
+// call (func2 B)
+#[rustfmt::skip]
+static COMPOSE_FN: Value = cera!(
+    ([0] [1])
+    (
+        (aggr_get ([3] [1]))
+        (aggr_get ([3] [2]))
+        (aggr_get ([4] [1]))
+        (aggr_get ([4] [2]))
+        (call ([6] [5]))
+        (call ([7] [8]))
     )
 );
 
@@ -805,27 +922,29 @@ static AGGR_VEC_INIT: Value = cera!(
 );
 
 #[rustfmt::skip]
-static AGGR_VEC_PUSH: Value = cera!();
+static AGGR_VEC_PUSH: Value = cera!(
 
-// ((len buf) desired_len) -> (len buf)
+);
+
+// ((len buf) desired_capacity) -> (len buf)
 //
 // 0: self
 //  0
 //  1
-//  vec
 //  arg
-//  len
-//  buf
-//  desired_len
-//  len_cmp (cmp (len desired_len))
+//  vec (aggr_get (arg 0))
+//  desired_len (aggr_get (arg 1))
+//  buf (aggr_get (vec 1))
+//  capacity (aggr_len buf)
+//  len_cmp (cmp (capacity desired_capacity))
 //  should_resize (eq (len_cmp 0))
-//  if (should_resize () (identity (len buf)))
+//  if (should_resize (call (AGGR_VEC_RESIZE arg)) (identity (len buf)))
 #[rustfmt::skip]
 static AGGR_VEC_RESERVE: Value = cera!(
 
 );
 
-// ((len buf) desired_len) -> (len buf)
+// ((len buf) desired_capacity) -> (len buf)
 //
 // 0: self
 //  0
@@ -833,12 +952,13 @@ static AGGR_VEC_RESERVE: Value = cera!(
 //  MAX
 //  arg
 //  vec (aggr_get (arg 0))
+//  desired_capacity (aggr_get (arg 1))
 //  len (aggr_get (vec 0))
 //  buf (aggr_get (vec 1))
-//  desired_len (aggr_get (arg 1))
-//  min_new_len (shl (len 1))
-//  new_len (MAX (desired_len min_new_len))
-//  new_buf (aggr_make new_len)
+//  min_new_capacity (shl (len 1))
+//  new_capacity (MAX (desired_capacity min_new_capacity))
+//  new_buf (aggr_make new_capacity)
+//
 static AGGR_VEC_RESIZE: Value = cera!();
 
 // (len buf) -> ((len buf) value)

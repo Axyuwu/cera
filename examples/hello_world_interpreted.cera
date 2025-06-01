@@ -2,26 +2,21 @@ builtin_eval (
     call (
         (
             (
+                "\x00"
+                "\x01"
                 "\x03"
-                aggr_slice_new
-                aggr_slice_fold
-                ((
-                    "\x00"
-                    "\x01"
-                ) (
-                    (aggr_get ("\x03" "\x01"))
-                    (aggr_get ("\x03" "\x02"))
-                    (add ("\x04" "\x05"))
-                ))
+                "\x04"
+                aggr_slice_copy
             )
             (
-                (builtin_import "\x02")
-                (builtin_import "\x03")
-                (call ("\x06" "\x05"))
-                (call ("\x07" ("\x08" "\x01" "\x04")))
+                (builtin_import "\x05")
+                (aggr_make "\x04")
+                (identity ("\x02" "\x04" "\x08"))
+                (identity ("\x01" "\x03" "\x06"))
+                (call ("\x07" ("\x0A" "\x09")))
             )
         )
-        ("\x70" "\xF3" "\x03\xB0")
+        (this is a slice copy)
     )
 )
 

@@ -12,6 +12,8 @@ use arithemtic::Arithmetic;
 use builtin_values::BuiltinImport;
 use builtin_values::FALSE;
 use builtin_values::TRUE;
+use builtin_values::TYPE_AGGR;
+use builtin_values::TYPE_BYTES;
 use world::AsWorld;
 use world::PureWorld;
 use world::World;
@@ -98,6 +100,7 @@ enum BuiltinFunc {
     AggrSet,
     AggrLen,
     AggrMake,
+    TypeOf,
     Arithmetic(Arithmetic),
     WorldIo(WorldIo),
     BuiltinImport(BuiltinImport),
@@ -117,6 +120,7 @@ impl BuiltinFunc {
             Self::AggrSet => Self::poll_aggr_set(value),
             Self::AggrLen => Self::poll_aggr_len(value),
             Self::AggrMake => Self::poll_aggr_make(value),
+            Self::TypeOf => Self::poll_typeof(value),
             Self::Arithmetic(arithmetic) => arithmetic.poll(value),
             Self::WorldIo(world_io) => world_io.poll(value, world),
             Self::BuiltinImport(builtin_import) => builtin_import.poll(value),
@@ -131,7 +135,20 @@ impl BuiltinFunc {
     }
     fn poll_call(value: Value, world: &mut impl AsWorld) -> FuncThunk {
         let [func, arg] = get_args(value);
-        Let::init(func).poll(arg, world)
+        let func = func.into_aggregate();
+        match func.len() {
+            2 => {
+                // Function
+                Let::init(Value::Aggregate(func)).poll(arg, world)
+            }
+            3 => {
+                // Closure
+                let [magic, func, captured] = func.into_array();
+                debug_assert!(&**magic.as_bytes() == b"closure");
+                Let::init(func).poll(Value::aggregate_move([captured, arg]), world)
+            }
+            _ => panic!(),
+        }
     }
     fn poll_if(value: Value) -> FuncThunk {
         let [cond, ifthen, ifelse] = get_args(value);
@@ -184,6 +201,14 @@ impl BuiltinFunc {
                     .take(get_usize(value.as_bytes()))
                     .collect::<Arc<_, _>>(),
             ),
+        }
+    }
+    fn poll_typeof(value: Value) -> FuncThunk {
+        FuncThunk::Done {
+            value: match value {
+                Value::Bytes(_) => TYPE_BYTES.static_copy(),
+                Value::Aggregate(_) => TYPE_AGGR.static_copy(),
+            },
         }
     }
     fn from_value(value: &Value) -> Self {
