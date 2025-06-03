@@ -24,8 +24,8 @@ use super::{
 #[repr(u8)]
 enum ByteStorage<C> {
     Inline {
-        len: u8,
-        bytes: [u8; 22],
+        len: usize,
+        bytes: [u8; 16],
     },
     /// Invariant: This pointer is a unique reference to the data of a uniquely owned Arc
     Arc(Arc<[u8], C>),
@@ -33,11 +33,11 @@ enum ByteStorage<C> {
 impl<C: CacheArcCache> ByteStorage<C> {
     fn new(size: usize) -> Self {
         match size {
-            size @ 0..=22 => Self::Inline {
-                len: size as u8,
-                bytes: [0; 22],
+            size @ 0..=16 => Self::Inline {
+                len: size,
+                bytes: [0; 16],
             },
-            size @ 23.. => Self::Arc(
+            size => Self::Arc(
                 // Why is there no way to do this safely without doing extra allocations?
                 {
                     let mut arc = Arc::<[u8], C>::new_uninit(size);
@@ -58,7 +58,7 @@ impl<C: CacheArcCache> ByteStorage<C> {
 impl<C> AsRef<[u8]> for ByteStorage<C> {
     fn as_ref(&self) -> &[u8] {
         match self {
-            Self::Inline { len, bytes } => &bytes[0..(*len as usize)],
+            Self::Inline { len, bytes } => &bytes[0..(*len)],
             Self::Arc(bytes) => bytes,
         }
     }

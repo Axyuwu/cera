@@ -325,6 +325,12 @@ impl<T: ?Sized, C> Deref for CacheArc<T, C> {
     }
 }
 
+impl<T: ?Sized, C> AsRef<T> for CacheArc<T, C> {
+    fn as_ref(&self) -> &T {
+        &*self
+    }
+}
+
 #[derive(Debug, Copy, Clone)]
 pub struct TryFromSliceError(());
 

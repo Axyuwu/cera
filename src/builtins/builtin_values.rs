@@ -96,7 +96,11 @@ impl BuiltinImport {
                 b"aggr_slice_map" => AGGR_SLICE_MAP.static_copy(),
                 b"aggr_slice_fold" => AGGR_SLICE_FOLD.static_copy(),
                 b"aggr_slice_copy" => AGGR_SLICE_COPY.static_copy(),
-                b"aggr_vec_slice" => AGGR_VEC_SLICE.static_copy(),
+                b"aggr_vec_borrow_slice" => AGGR_VEC_BORROW_SLICE.static_copy(),
+                b"aggr_vec_unborrow_slice" => AGGR_VEC_UNBORROW_SLICE.static_copy(),
+                b"aggr_vec_init" => AGGR_VEC_INIT.static_copy(),
+                b"aggr_vec_push" => AGGR_VEC_PUSH.static_copy(),
+                b"aggr_vec_reserve" => AGGR_VEC_RESERVE.static_copy(),
                 b"min" => MIN.static_copy(),
                 b"max" => MAX.static_copy(),
                 b"true" => TRUE.static_copy(),
@@ -206,7 +210,7 @@ static AGGR_SLICE_NEW: Value = cera!(
     )
 );
 
-// slice -> self
+// slice -> buf
 //
 // 0: self
 // 1: 2
@@ -921,45 +925,106 @@ static AGGR_VEC_INIT: Value = cera!(
     [0] ()
 );
 
+// ((len buf) value) -> (len buf)
+//
+// 0: self
+// 1: 0
+// 2: 1
+// 3: AGGR_VEC_RESERVE
+// 4: arg
+// 5: vec (aggr_get (arg 0))
+// 6: value (aggr_get (arg 1))
+// 7: len (aggr_get (vec 0))
+// 8: new_len (add (len 1))
+// 9: vec2 (call (AGGR_VEC_RESERVE (vec new_len)))
+// 10: buf (aggr_get (vec2 1))
+// 11: buf2 (aggr_set (buf len value))
+// identity (new_len buf2)
 #[rustfmt::skip]
 static AGGR_VEC_PUSH: Value = cera!(
-
+    ([0] [1] {AGGR_VEC_RESERVE})
+    (
+        (aggr_get ([4] [1]))
+        (aggr_get ([4] [2]))
+        (aggr_get ([5] [1]))
+        (add ([7] [2]))
+        (call ([3] ([5] [8])))
+        (aggr_get ([9] [2]))
+        (aggr_set ([10] [7] [6]))
+        (identity ([8] [11]))
+    )
 );
 
 // ((len buf) desired_capacity) -> (len buf)
 //
 // 0: self
-//  0
-//  1
-//  arg
-//  vec (aggr_get (arg 0))
-//  desired_len (aggr_get (arg 1))
-//  buf (aggr_get (vec 1))
-//  capacity (aggr_len buf)
-//  len_cmp (cmp (capacity desired_capacity))
-//  should_resize (eq (len_cmp 0))
-//  if (should_resize (call (AGGR_VEC_RESIZE arg)) (identity (len buf)))
+// 1: 0
+// 2: 1
+// 3: call
+// 4: AGGR_VEC_RESIZE
+// 5: identity
+// 6: arg
+// 7: vec (aggr_get (arg 0))
+// 8: desired_capacity (aggr_get (arg 1))
+// 9: buf (aggr_get (vec 1))
+// 10: capacity (aggr_len buf)
+// 11: len_cmp (cmp (capacity desired_capacity))
+// 12: should_resize (eq (len_cmp 0))
+// if (should_resize (call (AGGR_VEC_RESIZE arg)) (identity vec))
 #[rustfmt::skip]
 static AGGR_VEC_RESERVE: Value = cera!(
-
+    ([0] [1] call {AGGR_VEC_RESIZE} identity)
+    (
+        (aggr_get ([6] [1]))
+        (aggr_get ([6] [2]))
+        (aggr_get ([7] [2]))
+        (aggr_len [9])
+        (cmp ([10] [8]))
+        (eq ([11] [1]))
+        (if ([12]
+            ([3] ([4] [6]))
+            ([5] [7])
+        ))
+    )
 );
 
 // ((len buf) desired_capacity) -> (len buf)
 //
 // 0: self
-//  0
-//  1
-//  MAX
-//  arg
-//  vec (aggr_get (arg 0))
-//  desired_capacity (aggr_get (arg 1))
-//  len (aggr_get (vec 0))
-//  buf (aggr_get (vec 1))
-//  min_new_capacity (shl (len 1))
-//  new_capacity (MAX (desired_capacity min_new_capacity))
-//  new_buf (aggr_make new_capacity)
-//
-static AGGR_VEC_RESIZE: Value = cera!();
+// 0: 0
+// 1: 1
+// 2: 2
+// 3: MAX
+// 4: AGGR_SLICE_COPY
+// 5: AGGR_SLICE_BUF
+// 6: arg
+// 7: vec (aggr_get (arg 0))
+// 8: desired_capacity (aggr_get (arg 1))
+// 9: len (aggr_get (vec 0))
+// 10: buf (aggr_get (vec 1))
+// 11: current_capacity (aggr_len buf)
+// 12: min_new_capacity (shl (current_capacity 1))
+// 13: new_capacity (call (MAX (desired_capacity min_new_capacity)))
+// 14: new_buf (aggr_make new_capacity)
+// 15: new_buf_slice (call (AGGR_SLICE_COPY ((0 len buf) (0 len new_buf))))
+// 16 new_buf2 (call (AGGR_SLICE_BUF new_buf_slice))
+// identity (len new_buf2)
+static AGGR_VEC_RESIZE: Value = cera!(
+    ([0] [1] [2] {MAX} {AGGR_SLICE_COPY} {AGGR_SLICE_BUF})
+    (
+        (aggr_get ([6] [1]))
+        (aggr_get ([6] [2]))
+        (aggr_get ([7] [1]))
+        (aggr_get ([7] [2]))
+        (aggr_len [10])
+        (shl ([11] [2]))
+        (call ([3] ([8] [12])))
+        (aggr_make [13])
+        (call ([4] (([1] [9] [10]) ([1] [9] [14]))))
+        (call ([5] [15]))
+        (identity ([9] [16]))
+    )
+);
 
 // (len buf) -> ((len buf) value)
 #[rustfmt::skip]
@@ -976,7 +1041,7 @@ static AGGR_VEC_POP: Value = cera!(
 // 5: buf (aggr_get (arg 1))
 // identity (0 len buf)
 #[rustfmt::skip]
-static AGGR_VEC_SLICE: Value = cera!(
+static AGGR_VEC_BORROW_SLICE: Value = cera!(
     ([0] [1])
     (
         (aggr_get ([3] [1]))
@@ -985,11 +1050,24 @@ static AGGR_VEC_SLICE: Value = cera!(
     )
 );
 
+// (0 len buf) -> (len buf)
+//
+// 0: self
+// 1: 1
+// 2: 2
+// 3: arg
+// 4: len (aggr_get (arg 1))
+// 5: buf (aggr_get (arg 2))
+// identity (len buf)
 #[rustfmt::skip]
-static AGGR_VEC_BORROW_SLICE: Value = cera!();
-
-#[rustfmt::skip]
-static AGGR_VEC_UNBORROW_SLICE: Value = cera!();
+static AGGR_VEC_UNBORROW_SLICE: Value = cera!(
+    ([1] [2])
+    (
+        (aggr_get ([3] [1]))
+        (aggr_get ([3] [2]))
+        (identity ([4] [5]))
+    )
+);
 
 // (bytes bytes) -> bytes
 // 0: self

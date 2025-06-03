@@ -222,6 +222,7 @@ impl BuiltinFunc {
             b"aggr_set" => Self::AggrSet,
             b"aggr_len" => Self::AggrLen,
             b"aggr_make" => Self::AggrMake,
+            b"type_of" => Self::TypeOf,
             s => {
                 if let Some(a) = Arithmetic::from_ident(s) {
                     Self::Arithmetic(a)

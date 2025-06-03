@@ -211,7 +211,12 @@ impl Value {
         Self::aggregate_const(cache, slice)
     }
     pub fn aggregate_cloned(slice: impl AsRef<[Self]>) -> Self {
-        Self::Aggregate(EvalSlice::Arc(slice.as_ref().into()))
+        let slice = slice.as_ref();
+        if slice.len() == 0 {
+            Self::unit()
+        } else {
+            Self::Aggregate(EvalSlice::Arc(slice.as_ref().into()))
+        }
     }
     pub fn aggregate_move(slice: impl Into<Arc<[Self], Cache>>) -> Self {
         Self::Aggregate(EvalSlice::Arc(slice.into()))
