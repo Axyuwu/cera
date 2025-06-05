@@ -2,21 +2,21 @@ builtin_eval (
     call (
         (
             (
-                "\x00"
-                "\x01"
-                "\x03"
-                "\x04"
-                aggr_slice_copy
+                aggr_slice_new
+                aggr_slice_fold
+                aggr_vec_init
+                aggr_vec_push
             )
             (
-                (builtin_import "\x05")
-                (aggr_make "\x04")
-                (identity ("\x02" "\x04" "\x08"))
-                (identity ("\x01" "\x03" "\x06"))
-                (call ("\x07" ("\x0A" "\x09")))
+                (builtin_import "\x01")
+                (builtin_import "\x02")
+                (builtin_import "\x03")
+                (builtin_import "\x04")
+                (call ("\x06" "\x05"))
+                (call ("\x07" ("\x0A" "\x08" "\x09")))
             )
         )
-        (this is a slice copy)
+        (this is a vec fold that is amortized constant growth time though it doesnt use iter size hints)
     )
 )
 

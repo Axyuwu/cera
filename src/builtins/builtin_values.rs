@@ -991,38 +991,38 @@ static AGGR_VEC_RESERVE: Value = cera!(
 // ((len buf) desired_capacity) -> (len buf)
 //
 // 0: self
-// 0: 0
-// 1: 1
-// 2: 2
-// 3: MAX
-// 4: AGGR_SLICE_COPY
-// 5: AGGR_SLICE_BUF
-// 6: arg
-// 7: vec (aggr_get (arg 0))
-// 8: desired_capacity (aggr_get (arg 1))
-// 9: len (aggr_get (vec 0))
-// 10: buf (aggr_get (vec 1))
-// 11: current_capacity (aggr_len buf)
-// 12: min_new_capacity (shl (current_capacity 1))
-// 13: new_capacity (call (MAX (desired_capacity min_new_capacity)))
-// 14: new_buf (aggr_make new_capacity)
-// 15: new_buf_slice (call (AGGR_SLICE_COPY ((0 len buf) (0 len new_buf))))
-// 16 new_buf2 (call (AGGR_SLICE_BUF new_buf_slice))
+// 1: 0
+// 2: 1
+// 3: 2
+// 4: MAX
+// 5: AGGR_SLICE_COPY
+// 6: AGGR_SLICE_BUF
+// 7: arg
+// 8: vec (aggr_get (arg 0))
+// 9: desired_capacity (aggr_get (arg 1))
+// 10: len (aggr_get (vec 0))
+// 11: buf (aggr_get (vec 1))
+// 12: current_capacity (aggr_len buf)
+// 13: min_new_capacity (shl (current_capacity 1))
+// 14: new_capacity (call (MAX (desired_capacity min_new_capacity)))
+// 15: new_buf (aggr_make new_capacity)
+// 16: new_buf_slice (call (AGGR_SLICE_COPY ((0 len buf) (0 len new_buf))))
+// 17 new_buf2 (call (AGGR_SLICE_BUF new_buf_slice))
 // identity (len new_buf2)
 static AGGR_VEC_RESIZE: Value = cera!(
     ([0] [1] [2] {MAX} {AGGR_SLICE_COPY} {AGGR_SLICE_BUF})
     (
-        (aggr_get ([6] [1]))
-        (aggr_get ([6] [2]))
         (aggr_get ([7] [1]))
         (aggr_get ([7] [2]))
-        (aggr_len [10])
-        (shl ([11] [2]))
-        (call ([3] ([8] [12])))
-        (aggr_make [13])
-        (call ([4] (([1] [9] [10]) ([1] [9] [14]))))
-        (call ([5] [15]))
-        (identity ([9] [16]))
+        (aggr_get ([8] [1]))
+        (aggr_get ([8] [2]))
+        (aggr_len [11])
+        (shl ([12] [2]))
+        (call ([4] ([9] [13])))
+        (aggr_make [14])
+        (call ([5] (([1] [10] [11]) ([1] [10] [15]))))
+        (call ([6] [16]))
+        (identity ([10] [17]))
     )
 );
 
@@ -1086,7 +1086,7 @@ static MIN: Value = cera!(
     (
         (aggr_get ([4] [1]))
         (aggr_get ([4] [2]))
-        (cmp [5] [6])
+        (cmp ([5] [6]))
         (eq ([7] [1]))
         (if ([8]
             ([3] [5])
@@ -1111,7 +1111,7 @@ static MAX: Value = cera!(
     (
         (aggr_get ([4] [1]))
         (aggr_get ([4] [2]))
-        (cmp [5] [6])
+        (cmp ([5] [6]))
         (eq ([7] [1]))
         (if ([8]
             ([3] [6])

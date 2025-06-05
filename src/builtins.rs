@@ -290,7 +290,7 @@ struct LetProcessed {
 impl LetProcessed {
     fn process_func(func: &Value) -> Self {
         let [constants, expressions] = get_args(func.clone()).map(Value::into_aggregate);
-        assert!(!expressions.is_empty(),);
+        assert!(!expressions.is_empty());
 
         let constants: Box<[_]> = std::iter::once(func.clone())
             .chain(constants.iter().cloned())
