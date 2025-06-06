@@ -101,6 +101,7 @@ impl BuiltinImport {
                 b"aggr_vec_init" => AGGR_VEC_INIT.static_copy(),
                 b"aggr_vec_push" => AGGR_VEC_PUSH.static_copy(),
                 b"aggr_vec_reserve" => AGGR_VEC_RESERVE.static_copy(),
+                b"aggr_vec_pop" => AGGR_VEC_POP.static_copy(),
                 b"min" => MIN.static_copy(),
                 b"max" => MAX.static_copy(),
                 b"true" => TRUE.static_copy(),
@@ -1027,8 +1028,28 @@ static AGGR_VEC_RESIZE: Value = cera!(
 );
 
 // (len buf) -> ((len buf) value)
+//
+// 0: self
+// 1: 0
+// 2: 1
+// 3: arg
+// 4: len (aggr_get (arg 0))
+// 5: buf (aggr_get (arg 1))
+// 6: len2 (sub (len 1))
+// 7: value (aggr_get (buf len2))
+// 8: buf2 (aggr_set (buf len2 ()))
+// identity ((len2 buf2) value)
 #[rustfmt::skip]
 static AGGR_VEC_POP: Value = cera!(
+    ([0] [1])
+    (
+        (aggr_get ([3] [1]))
+        (aggr_get ([3] [2]))
+        (sub ([4] [2]))
+        (aggr_get ([5] [6]))
+        (aggr_set ([5] [6] ()))
+        (identity (([6] [8]) [7]))
+    )
 );
 
 // (len buf) -> (0 len buf)
@@ -1120,5 +1141,12 @@ static MAX: Value = cera!(
     )
 );
 
+// (constants intermediates tail_expression) -> (constants expressions)
 #[rustfmt::skip]
 static FUNC_SYNTAX_DESUGAR_BASIC: Value = cera!();
+
+#[rustfmt::skip]
+static FUNC_SYNTAX_PUSH_CONSTANT: Value = cera!();
+
+#[rustfmt::skip]
+static FUNC_SYNTAX_DESUGAR_PUSH_EXPRESSION: Value = cera!();

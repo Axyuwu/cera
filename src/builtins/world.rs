@@ -344,7 +344,9 @@ impl WorldIo {
                 WorldIo::ProcessChildId => todo!(),
                 WorldIo::ProcessChildWait => todo!(),
                 WorldIo::ProcessChildHasExited => todo!(),
-                WorldIo::ProcessAbort => panic!("program aborted:\n{value}"),
+                WorldIo::ProcessAbort => {
+                    world_map_unit(world, value, |value| panic!("program aborted:\n{value}"))
+                }
                 WorldIo::ProcessExit => todo!(),
                 WorldIo::ProcessId => todo!(),
                 WorldIo::FsFileOpen => todo!(),
@@ -397,7 +399,7 @@ impl WorldIo {
                                 func: BuiltinFunc::BuiltinEval,
                                 value,
                             }
-                            .eval(&mut world)
+                            .eval::<false>(&mut world)
                         })
                         .into()
                 }),

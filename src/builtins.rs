@@ -6,6 +6,7 @@ mod world;
 use crate::utils::sync::cache_arc::CacheArc as Arc;
 use crate::utils::sync::cache_lock::CacheLock;
 use std::fmt::Debug;
+use std::iter::repeat_n;
 
 use arithemtic::trim_zeros;
 use arithemtic::Arithmetic;
@@ -38,7 +39,7 @@ pub fn eval_builtin(atom: Atom) -> Value {
         func: BuiltinFunc::Call,
         value: Value::aggregate_move([builtin_values::BUILTIN_EVAL_FUNC.static_copy(), atom]),
     }
-    .eval(&mut world)
+    .eval::<false>(&mut world)
 }
 
 pub fn eval_pure(value: Value) -> Value {
@@ -46,7 +47,7 @@ pub fn eval_pure(value: Value) -> Value {
         func: BuiltinFunc::BuiltinEval,
         value,
     }
-    .eval(&mut PureWorld)
+    .eval::<false>(&mut PureWorld)
 }
 
 fn atom_to_val(atom: Atom) -> Value {
@@ -79,10 +80,10 @@ enum FuncThunk {
 }
 
 impl FuncThunk {
-    fn eval(mut self, world: &mut impl AsWorld) -> Value {
+    fn eval<const IS_CONST_FOLD: bool>(mut self, world: &mut impl AsWorld) -> Value {
         loop {
             match self {
-                FuncThunk::Step { func, value } => self = func.poll(value, world),
+                FuncThunk::Step { func, value } => self = func.poll::<IS_CONST_FOLD>(value, world),
                 FuncThunk::Done { value } => break value,
             }
         }
@@ -108,11 +109,11 @@ enum BuiltinFunc {
 
 impl BuiltinFunc {
     #[inline]
-    fn poll(self, value: Value, world: &mut impl AsWorld) -> FuncThunk {
+    fn poll<const IS_CONST_FOLD: bool>(self, value: Value, world: &mut impl AsWorld) -> FuncThunk {
         use FuncThunk::*;
         match self {
             Self::BuiltinEval => Self::poll_builtin_eval(value),
-            Self::Call => Self::poll_call(value, world),
+            Self::Call => Self::poll_call::<IS_CONST_FOLD>(value, world),
             Self::If => Self::poll_if(value),
             Self::BytesEq => Self::poll_bytes_eq(value),
             Self::Identity => Done { value },
@@ -133,19 +134,19 @@ impl BuiltinFunc {
             value,
         }
     }
-    fn poll_call(value: Value, world: &mut impl AsWorld) -> FuncThunk {
+    fn poll_call<const IS_CONST_FOLD: bool>(value: Value, world: &mut impl AsWorld) -> FuncThunk {
         let [func, arg] = get_args(value);
         let func = func.into_aggregate();
         match func.len() {
             2 => {
                 // Function
-                Let::init(Value::Aggregate(func)).poll(arg, world)
+                Let::call::<IS_CONST_FOLD>(Value::Aggregate(func), arg, world)
             }
             3 => {
                 // Closure
                 let [magic, func, captured] = func.into_array();
                 debug_assert!(&**magic.as_bytes() == b"closure");
-                Let::init(func).poll(Value::aggregate_move([captured, arg]), world)
+                Let::call::<IS_CONST_FOLD>(func, Value::aggregate_move([captured, arg]), world)
             }
             _ => panic!(),
         }
@@ -270,33 +271,51 @@ impl LetStepArgs {
             Self::IndexMove(index) => std::mem::take(&mut state[*index]).unwrap(),
         }
     }
-    fn new_no_move(value: &Value) -> Self {
+    fn try_fetch_no_move(&self, state: &mut [Option<Value>]) -> Option<Value> {
+        match self {
+            Self::Compound(compound) => Some(Value::Aggregate(EvalSlice::Arc(
+                compound
+                    .iter()
+                    .map(|arg| arg.try_fetch_no_move(state))
+                    .collect::<Option<_>>()?,
+            ))),
+            Self::Index(index) => state[*index].clone(),
+            Self::IndexMove(index) => state[*index].clone(),
+        }
+    }
+    fn new(value: &Value) -> Self {
         match value {
             Value::Bytes(eval_slice) => Self::Index(get_usize(eval_slice)),
             Value::Aggregate(eval_slice) => {
-                Self::Compound(eval_slice.iter().map(Self::new_no_move).collect())
+                Self::Compound(eval_slice.iter().map(Self::new).collect())
             }
+        }
+    }
+    fn idx_map(&mut self, func: &mut impl FnMut(&mut usize)) {
+        match self {
+            LetStepArgs::Compound(items) => items.iter_mut().for_each(|e| e.idx_map(func)),
+            LetStepArgs::Index(i) => func(i),
+            LetStepArgs::IndexMove(i) => func(i),
         }
     }
 }
 
 #[derive(Debug)]
 struct LetProcessed {
-    offset: usize, // = constants.len() + 1
     instructions: Box<[LetStep]>,
     constants: Box<[Value]>,
 }
 
 impl LetProcessed {
-    fn process_func(func: &Value) -> Self {
+    fn process_func<const IS_CONST_FOLD: bool>(func: &Value) -> Self {
         let [constants, expressions] = get_args(func.clone()).map(Value::into_aggregate);
         assert!(!expressions.is_empty());
 
-        let constants: Box<[_]> = std::iter::once(func.clone())
+        let mut constants: Vec<_> = std::iter::once(func.clone())
             .chain(constants.iter().cloned())
             .collect();
 
-        let mut instructions: Box<[_]> = expressions
+        let mut instructions: Vec<_> = expressions
             .iter()
             .map(|expression| {
                 let expression = expression.as_aggregate();
@@ -306,13 +325,13 @@ impl LetProcessed {
 
                 LetStep {
                     func,
-                    args: LetStepArgs::new_no_move(args),
+                    args: LetStepArgs::new(args),
                 }
             })
             .collect();
 
         // every value except the last (including arg)
-        let mut live_status: Box<[_]> =
+        let mut live_status: Vec<_> =
             std::iter::repeat_n(false, constants.len() + expressions.len()).collect();
         // compute drops
         fn args_compute_moves(args: &mut LetStepArgs, live_status: &mut [bool]) {
@@ -335,16 +354,104 @@ impl LetProcessed {
             .rev()
             .for_each(|step| args_compute_moves(&mut step.args, &mut live_status));
 
+        if !IS_CONST_FOLD {
+            Self::constant_fold(&mut constants, &mut instructions);
+            Self::trim_dead_code(&mut constants, &mut instructions);
+        }
+
+        let (instructions, constants) = (instructions.into(), constants.into());
+
         Self {
-            offset: constants.len() + 1,
             instructions,
             constants,
         }
     }
+    fn constant_fold(constants: &mut Vec<Value>, instructions: &mut Vec<LetStep>) {
+        assert!(!instructions.is_empty());
+
+        let mut values: Vec<_> = constants
+            .iter()
+            .cloned()
+            .map(Some)
+            .chain(repeat_n(None, instructions.len() + 1))
+            .collect();
+
+        let instr_start = constants.len() + 1;
+
+        instructions.iter().enumerate().for_each(|(i, step)| {
+            let LetStep { func, args } = step;
+            let Some(args) = args.try_fetch_no_move(&mut values) else {
+                return;
+            };
+            let val = FuncThunk::Step {
+                func: *func,
+                value: args,
+            }
+            .eval::<true>(&mut PureWorld);
+            let idx = i + instr_start;
+            values[idx] = Some(val);
+        });
+
+        values.drain(0..instr_start);
+
+        if let Some(tail) = values.pop().unwrap() {
+            constants.clear();
+            instructions.clear();
+            constants.push(tail);
+            instructions.push(LetStep {
+                func: BuiltinFunc::Identity,
+                args: LetStepArgs::IndexMove(0),
+            });
+            return;
+        }
+
+        let mut extra_constants = 0usize;
+        let value_map = values
+            .iter()
+            .map(|val| {
+                val.is_some().then(|| {
+                    let res = extra_constants;
+                    extra_constants += 1;
+                    res
+                })
+            })
+            .collect::<Box<_>>();
+        let value_map_offset = constants.len();
+
+        let value_map_get = |i: usize| {
+            i.checked_sub(instr_start)
+                .and_then(|i| value_map.get(i).and_then(Option::as_ref))
+                .map(|i| *i + value_map_offset)
+        };
+
+        instructions.iter_mut().for_each(|instr| {
+            instr.args.idx_map(&mut |idx| {
+                if let Some(constant) = value_map_get(*idx) {
+                    *idx = constant
+                } else if *idx >= constants.len() {
+                    *idx += extra_constants
+                }
+            });
+        });
+
+        constants.extend(values.into_iter().filter_map(std::convert::identity));
+    }
+    fn trim_dead_code(constants: &mut Vec<Value>, instructions: &mut Vec<LetStep>) {}
 }
 
 impl Let {
-    fn poll(mut self, mut value: Value, world: &mut impl AsWorld) -> FuncThunk {
+    fn call<const IS_CONST_FOLD: bool>(
+        func: Value,
+        arg: Value,
+        world: &mut impl AsWorld,
+    ) -> FuncThunk {
+        Let::init::<IS_CONST_FOLD>(func).poll::<IS_CONST_FOLD>(arg, world)
+    }
+    fn poll<const IS_CONST_FOLD: bool>(
+        mut self,
+        mut value: Value,
+        world: &mut impl AsWorld,
+    ) -> FuncThunk {
         loop {
             let Let {
                 idx,
@@ -354,7 +461,8 @@ impl Let {
             state[*idx] = Some(value);
             *idx += 1;
 
-            let LetStep { func, args } = &processed.instructions[*idx - processed.offset];
+            let LetStep { func, args } =
+                &processed.instructions[*idx - processed.constants.len() - 1];
 
             let res = args.fetch(state);
 
@@ -363,15 +471,24 @@ impl Let {
             if *idx == state.len() {
                 break FuncThunk::Step { func, value: res };
             } else {
-                value = FuncThunk::Step { func, value: res }.eval(world);
+                value = FuncThunk::Step { func, value: res }.eval::<IS_CONST_FOLD>(world);
             }
         }
     }
-    fn init(func: Value) -> Self {
-        let res = func.cache().generate(|| CacheInner {
-            func: Arc::new(LetProcessed::process_func(&func)),
-        });
-        Self::new(res.func.clone())
+    fn init<const IS_CONST_FOLD: bool>(func: Value) -> Self {
+        let func = if !IS_CONST_FOLD {
+            let res = func.cache().generate(|| CacheInner {
+                func: Arc::new(LetProcessed::process_func::<IS_CONST_FOLD>(&func)),
+            });
+            res.func.clone()
+        } else {
+            match func.cache().get() {
+                Some(cache) => cache.func.clone(),
+                None => Arc::new(LetProcessed::process_func::<IS_CONST_FOLD>(&func)),
+            }
+        };
+
+        Self::new(func)
     }
     fn new(processed: Arc<LetProcessed>) -> Self {
         Self {
