@@ -2,21 +2,32 @@ builtin_eval (
     call (
         (
             (
-                aggr_slice_new
-                aggr_slice_fold
-                aggr_vec_init
-                aggr_vec_push
+                func_desugar_basic
             )
             (
                 (builtin_import "\x01")
-                (builtin_import "\x02")
-                (builtin_import "\x03")
-                (builtin_import "\x04")
-                (call ("\x06" "\x05"))
-                (call ("\x07" ("\x0A" "\x08" "\x09")))
+                (call ("\x03" "\x02"))
             )
         )
-        (this is a vec fold that is amortized constant growth time though it doesnt use iter size hints)
+        (
+            (
+                "\x00"
+                "\x02"
+                (
+                    (const1 "hai")
+                    (const2 "heyo")
+                )
+            )
+            (
+                "\x00"
+                "\x03"
+                (
+                    (expr1 (identity (const1 const2)))
+                    (expr2 (identity (expr1 arg)))
+                    (example_return (identity (expr2 self)))
+                )
+            )
+        )
     )
 )
 
