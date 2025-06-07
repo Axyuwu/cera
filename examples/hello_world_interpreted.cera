@@ -1,33 +1,24 @@
-builtin_eval (
-    call (
+call (
+    (
         (
-            (
-                func_desugar_basic
-            )
-            (
-                (builtin_import "\x01")
-                (call ("\x03" "\x02"))
-            )
+            func_desugar_basic_aggr
         )
         (
-            (
-                "\x00"
-                "\x02"
-                (
-                    (const1 "hai")
-                    (const2 "heyo")
-                )
-            )
-            (
-                "\x00"
-                "\x03"
-                (
-                    (expr1 (identity (const1 const2)))
-                    (expr2 (identity (expr1 arg)))
-                    (example_return (identity (expr2 self)))
-                )
-            )
+            (builtin_import "\x01")
+            (builtin_eval "\x03")
+            (call ("\x04" "\x02"))
+            (call ("\x05" ()))
+        )
+    )
+    (
+        (
+            (const1 "hai")
+            (const2 "heyo")
+        )
+        (
+            (example_return (identity (const1 const2)))
         )
     )
 )
+
 

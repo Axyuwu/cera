@@ -97,6 +97,7 @@ impl BuiltinImport {
                 b"type_aggr" => TYPE_AGGR.static_copy(),
                 b"type_bytes" => TYPE_BYTES.static_copy(),
                 b"func_desugar_basic" => FUNC_DESUGAR_BASIC.static_copy(),
+                b"func_desugar_basic_aggr" => FUNC_DESUGAR_BASIC_AGGR.static_copy(),
                 _ => panic!("invalid builtin_import argument: {value}"),
             },
         }
@@ -1432,5 +1433,37 @@ static FUNC_LOOKUP_STACK_FIND_STEP: Value = cera!(
         ))
         (add ([9] [2]))
         (identity ([13] [12]))
+    )
+);
+
+#[rustfmt::skip]
+static FUNC_DESUGAR_BASIC_AGGR: Value = cera!(
+    call
+    (
+        {FUNC_DESUGAR_BASIC}
+        (
+            (
+                [0]
+                [5]
+                (
+                    (zero [0])
+                    (one [1])
+                    (func_desugar_basic b"func_desugar_basic")
+                    (aggr_slice_new b"aggr_slice_new")
+                    (aggr_map b"aggr_map")
+                )
+            )
+            (
+                [0]
+                [5]
+                (
+                    (func_desugar_basic (builtin_import func_desugar_basic))
+                    (aggr_slice_new (builtin_import aggr_slice_new))
+                    (aggr_map (builtin_import aggr_map))
+                    (arg (call (aggr_map (arg aggr_slice_new))))
+                    (return (call (func_desugar_basic arg)))
+                )
+            )
+        )
     )
 );
