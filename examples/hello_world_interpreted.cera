@@ -1,24 +1,17 @@
-call (
-    (
-        (
-            func_desugar_basic_aggr
-        )
-        (
-            (builtin_import "\x01")
-            (builtin_eval "\x03")
-            (call ("\x04" "\x02"))
-            (call ("\x05" ()))
-        )
-    )
-    (
-        (
-            (const1 "hai")
-            (const2 "heyo")
-        )
-        (
-            (example_return (identity (const1 const2)))
-        )
-    )
+(
+    (aggr_slice_new "aggr_slice_new")
+    (aggr_slice_fold "aggr_slice_fold")
+    (aggr_vec_init "aggr_vec_init")
+    (aggr_vec_push "aggr_vec_push")
+    (example_slice (example very long aggr slice))
+)
+(
+    (aggr_slice_new (builtin_import aggr_slice_new))
+    (aggr_slice_fold (builtin_import aggr_slice_fold))
+    (aggr_vec_init (builtin_import aggr_vec_init))
+    (aggr_vec_push (builtin_import aggr_vec_push))
+    (example_slice (call (aggr_slice_new example_slice)))
+    (return (call (aggr_slice_fold (example_slice aggr_vec_init aggr_vec_push))))
 )
 
 

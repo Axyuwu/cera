@@ -35,9 +35,10 @@ pub struct CacheInner {
 pub fn eval_builtin(atom: Atom) -> Value {
     let (mut world, world_handle) = World::new();
     let atom = atom_to_val(atom);
+    let arg = Value::aggregate_move([atom, world_handle]);
     FuncThunk::Step {
         func: BuiltinFunc::Call,
-        value: Value::aggregate_move([builtin_values::BUILTIN_EVAL_FUNC.static_copy(), atom]),
+        value: Value::aggregate_move([builtin_values::BUILTIN_EVAL_FUNC.static_copy(), arg]),
     }
     .eval::<false>(&mut world)
 }
@@ -526,9 +527,11 @@ impl Let {
             });
             res.func.clone()
         } else {
-            match func.cache().get() {
-                Some(cache) => cache.func.clone(),
-                None => Arc::new(LetProcessed::process_func::<IS_CONST_FOLD>(&func)),
+            match func.cache().generate_nonblocking(|| CacheInner {
+                func: Arc::new(LetProcessed::process_func::<IS_CONST_FOLD>(&func)),
+            }) {
+                Ok(cache) => cache.func.clone(),
+                Err(func) => func().func,
             }
         };
 

@@ -110,6 +110,30 @@ impl BuiltinImport {
     }
 }
 
+// (func world) -> func_res
+//
+// 0: self
+// 1: 0
+// 2: 1
+// 3: ATOM_VALUE_TO_EVALUATABLE
+// 4: FUNC_DESUGAR_EXECUTE
+// 5: arg
+// 6: func (aggr_get (arg 0))
+// 7: world (aggr_get (arg 1))
+// 8: func2 (call (ATOM_VALUE_TO_EVALUATABLE func))
+// call (FUNC_DESUGAR_EXECUTE (func2 world))
+#[rustfmt::skip]
+pub static BUILTIN_EVAL_FUNC: Value = cera!(
+    ([0] [1] {ATOM_VALUE_TO_EVALUATABLE} {FUNC_DESUGAR_EXECUTE})
+    (
+        (aggr_get ([5] [1]))
+        (aggr_get ([5] [2]))
+        (call ([3] [6]))
+        (call ([4] ([8] [7])))
+    )
+);
+
+/*
 // 0: self
 // 1: ATOM_VALUE_TO_EVALUATABLE
 // 2: arg
@@ -122,7 +146,7 @@ pub static BUILTIN_EVAL_FUNC: Value = cera!(
         (call ([1] [2]))
         (builtin_eval [3])
     )
-);
+);*/
 
 // 0: self
 // 1: 0
@@ -1465,5 +1489,29 @@ static FUNC_DESUGAR_BASIC_AGGR: Value = cera!(
                 )
             )
         )
+    )
+);
+
+// (func func_arg) -> res
+//
+// 0: self
+// 1: 0
+// 2: 1
+// 3: FUNC_DESUGAR_BASIC_AGGR
+// 4: arg
+// 5: FUNC_DESUGAR_BASIC_AGGR2 (eval_builtin FUNC_DESUGAR_BASIC_AGGR)
+// 6: func (aggr_get (arg 0))
+// 7: func_arg (aggr_get (arg 1))
+// 8: func_processed (call (FUNC_DESUGAR_BASIC_AGGR2 func))
+// call (func_processed func_arg)
+#[rustfmt::skip]
+static FUNC_DESUGAR_EXECUTE: Value = cera!(
+    ([0] [1] {FUNC_DESUGAR_BASIC_AGGR})
+    (
+        (builtin_eval [3])
+        (aggr_get ([4] [1]))
+        (aggr_get ([4] [2]))
+        (call ([5] [6]))
+        (call ([8] [7]))
     )
 );

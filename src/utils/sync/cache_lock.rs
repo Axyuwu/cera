@@ -90,6 +90,34 @@ impl<T> CacheLock<T> {
 
         unsafe { &ptr.as_ref().unwrap_unchecked().0 }
     }
+    pub fn generate_nonblocking<F: FnOnce() -> T>(&self, func: F) -> Result<&T, F> {
+        let ptr_unaligned = std::ptr::null_mut::<CacheLockInner<T>>().wrapping_add(1);
+        let ptr_null = std::ptr::null_mut();
+        let key = self as *const _ as usize;
+
+        let ptr: *const _ = match self.inner.compare_exchange(
+            ptr_null,
+            ptr_unaligned,
+            Ordering::Acquire,
+            Ordering::Acquire,
+        ) {
+            Ok(_) => {
+                let ptr = Box::into_raw(Box::new(CacheLockInner(func())));
+                self.inner.store(ptr, Ordering::Release);
+                // Safety: we control key
+                unsafe { unpark_all(key, UnparkToken(0)) };
+                ptr
+            }
+            // This is safe as we know the pointer was created from a box
+            Err(ptr) if ptr.is_aligned() => ptr,
+            Err(ptr) => {
+                debug_assert_eq!(ptr, ptr_unaligned);
+                return Err(func);
+            }
+        };
+
+        Ok(unsafe { &ptr.as_ref().unwrap_unchecked().0 })
+    }
     #[inline]
     pub fn get(&self) -> Option<&T> {
         let ptr = self.inner.load(Ordering::Relaxed);
