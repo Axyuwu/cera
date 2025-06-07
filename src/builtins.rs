@@ -298,6 +298,13 @@ impl LetStepArgs {
             LetStepArgs::IndexMove(i) => func(i),
         }
     }
+    fn idx_for_each(&self, func: &mut impl FnMut(usize)) {
+        match self {
+            LetStepArgs::Compound(items) => items.iter().for_each(|e| e.idx_for_each(func)),
+            LetStepArgs::Index(i) => func(*i),
+            LetStepArgs::IndexMove(i) => func(*i),
+        }
+    }
 }
 
 #[derive(Debug)]
@@ -436,7 +443,52 @@ impl LetProcessed {
 
         constants.extend(values.into_iter().filter_map(std::convert::identity));
     }
-    fn trim_dead_code(constants: &mut Vec<Value>, instructions: &mut Vec<LetStep>) {}
+    fn trim_dead_code(constants: &mut Vec<Value>, instructions: &mut Vec<LetStep>) {
+        let mut use_status = constants
+            .iter()
+            .map(|_| false)
+            .chain(std::iter::once(true)) // arg
+            .chain(std::iter::repeat_n(false, instructions.len() - 1)) // intermediate expressions
+            .chain(std::iter::once(true)) // trailing expression
+            .collect::<Box<_>>();
+        instructions
+            .iter()
+            .rev()
+            .enumerate()
+            .for_each(|(idx_back, instr)| {
+                if use_status[use_status.len() - 1 - idx_back] {
+                    instr.args.idx_for_each(&mut |i| use_status[i] = true)
+                }
+            });
+        let constants_status = &use_status[..constants.len()];
+        let instructions_status = &use_status[(constants.len() + 1)..];
+        let mut idx = 0;
+        let new_indices = use_status
+            .iter()
+            .map(|i| {
+                i.then(|| {
+                    let res = idx;
+                    idx += 1;
+                    res
+                })
+            })
+            .collect::<Box<_>>();
+        let mut idx = 0;
+        constants.retain(|_| {
+            let res = constants_status[idx];
+            idx += 1;
+            res
+        });
+        let mut idx = 0;
+        instructions.retain(|_| {
+            let res = instructions_status[idx];
+            idx += 1;
+            res
+        });
+        instructions
+            .iter_mut()
+            .for_each(|step| step.args.idx_map(&mut |i| *i = new_indices[*i].unwrap()));
+    }
 }
 
 impl Let {

@@ -9,6 +9,7 @@ fn main() {
     let module = parse::Atom::parse_module(&input).unwrap();
     let start = Instant::now();
     let res = builtins::eval_builtin(module);
-    println!("took {} seconds", start.elapsed().as_secs_f32());
-    println!("{}", res);
+    let taken = start.elapsed().as_secs_f32();
+    //println!("{}", res);
+    println!("took {taken} seconds");
 }
