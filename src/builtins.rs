@@ -42,14 +42,6 @@ pub fn eval_builtin(atom: Atom) -> Value {
     .eval::<false>(&mut world)
 }
 
-pub fn eval_pure(value: Value) -> Value {
-    FuncThunk::Step {
-        func: BuiltinFunc::BuiltinEval,
-        value,
-    }
-    .eval::<false>(&mut PureWorld)
-}
-
 fn atom_to_val(atom: Atom) -> Value {
     static AGGR_CACHE: Cache = Cache::new();
     static IDENTIFIER_CACHE: Cache = Cache::new();

@@ -10,6 +10,6 @@ fn main() {
     let start = Instant::now();
     let res = builtins::eval_builtin(module);
     let taken = start.elapsed().as_secs_f32();
-    //println!("{}", res);
+    println!("{}", res);
     println!("took {taken} seconds");
 }
