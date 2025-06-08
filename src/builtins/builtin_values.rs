@@ -98,6 +98,7 @@ impl BuiltinImport {
                 b"type_bytes" => TYPE_BYTES.static_copy(),
                 b"func_desugar_basic" => FUNC_DESUGAR_BASIC.static_copy(),
                 b"func_desugar_basic_aggr" => FUNC_DESUGAR_BASIC_AGGR.static_copy(),
+                b"extensible_eval" => EXTENSIBLE_EVAL.static_copy(),
                 _ => panic!("invalid builtin_import argument: {value}"),
             },
         }
@@ -132,21 +133,6 @@ pub static BUILTIN_EVAL_FUNC: Value = cera!(
         (call ([4] ([8] [7])))
     )
 );
-
-/*
-// 0: self
-// 1: ATOM_VALUE_TO_EVALUATABLE
-// 2: arg
-// 3: evaluatable (call (ATOM_VALUE_TO_EVALUATABLE arg))
-// 4: builtin_eval evaluatable
-#[rustfmt::skip]
-pub static BUILTIN_EVAL_FUNC: Value = cera!(
-    ({ ATOM_VALUE_TO_EVALUATABLE })
-    (
-        (call ([1] [2]))
-        (builtin_eval [3])
-    )
-);*/
 
 // 0: self
 // 1: 0
@@ -1462,34 +1448,36 @@ static FUNC_LOOKUP_STACK_FIND_STEP: Value = cera!(
 
 #[rustfmt::skip]
 static FUNC_DESUGAR_BASIC_AGGR: Value = cera!(
-    call
-    (
-        {FUNC_DESUGAR_BASIC}
+    call ((
         (
+            {FUNC_DESUGAR_BASIC}
             (
-                [0]
-                [5]
                 (
-                    (zero [0])
-                    (one [1])
-                    (func_desugar_basic b"func_desugar_basic")
-                    (aggr_slice_new b"aggr_slice_new")
-                    (aggr_map b"aggr_map")
+                    [0]
+                    [5]
+                    (
+                        (zero [0])
+                        (one [1])
+                        (func_desugar_basic b"func_desugar_basic")
+                        (aggr_slice_new b"aggr_slice_new")
+                        (aggr_map b"aggr_map")
+                    )
                 )
-            )
-            (
-                [0]
-                [5]
                 (
-                    (func_desugar_basic (builtin_import func_desugar_basic))
-                    (aggr_slice_new (builtin_import aggr_slice_new))
-                    (aggr_map (builtin_import aggr_map))
-                    (arg (call (aggr_map (arg aggr_slice_new))))
-                    (return (call (func_desugar_basic arg)))
+                    [0]
+                    [5]
+                    (
+                        (func_desugar_basic (builtin_import func_desugar_basic))
+                        (aggr_slice_new (builtin_import aggr_slice_new))
+                        (aggr_map (builtin_import aggr_map))
+                        (arg (call (aggr_map (arg aggr_slice_new))))
+                        (return (call (func_desugar_basic arg)))
+                    )
                 )
             )
         )
-    )
+        ((call ([1] [2])))
+    ) ())
 );
 
 // (func func_arg) -> res
@@ -1499,7 +1487,7 @@ static FUNC_DESUGAR_BASIC_AGGR: Value = cera!(
 // 2: 1
 // 3: FUNC_DESUGAR_BASIC_AGGR
 // 4: arg
-// 5: FUNC_DESUGAR_BASIC_AGGR2 (eval_builtin FUNC_DESUGAR_BASIC_AGGR)
+// 5: FUNC_DESUGAR_BASIC_AGGR2 (builtin_eval FUNC_DESUGAR_BASIC_AGGR)
 // 6: func (aggr_get (arg 0))
 // 7: func_arg (aggr_get (arg 1))
 // 8: func_processed (call (FUNC_DESUGAR_BASIC_AGGR2 func))
@@ -1513,5 +1501,114 @@ static FUNC_DESUGAR_EXECUTE: Value = cera!(
         (aggr_get ([4] [2]))
         (call ([5] [6]))
         (call ([8] [7]))
+    )
+);
+
+macro_rules! cera_desugared {
+    ($($tt:tt)*) => {
+        cera!(call((
+            (($($tt)*) b"func_desugar_basic_aggr")
+            (
+                (builtin_import [2])
+                (builtin_eval [4])
+                (call ([5] [1]))
+            )
+        ) ()))
+    };
+}
+
+// (state tree) -> value
+//
+// state: (macro_stack ..)
+// macro_lookup: Vec<(name macro)>
+// macro: (state rem_tree) -> state
+// postproc: state -> value
+#[rustfmt::skip]
+static EXTENSIBLE_EVAL: Value = cera_desugared!(
+    (
+        (aggr_slice_fold b"aggr_slice_fold")
+        (zero [0])
+        (one [1])
+        (step {EXTENSIBLE_EVAL_STEP})
+    )
+    (
+        (state (aggr_get (arg zero)))
+        (tree (aggr_get (arg one)))
+        (macros_lookup (aggr_get (state zero)))
+        (aggr_slice_fold (builtin_import aggr_slice_fold))
+        (step (builtin_eval step))
+        (return (call (aggr_slice_fold (tree state step))))
+    )
+);
+
+// (state subtree) -> state
+//
+// state: (macro_stack ..)
+// macro: (state rem_tree) -> state
+#[rustfmt::skip]
+static EXTENSIBLE_EVAL_STEP: Value = cera_desugared!(
+    (
+        (aggr_vec_borrow_slice b"aggr_vec_borrow_slice")
+        (macro_lookup {MACRO_LOOKUP})
+        (aggr_slice_get b"aggr_slice_get")
+        (zero [0])
+        (one [1])
+    )
+    (
+        (state (aggr_get (arg zero)))
+        (subtree (aggr_get (arg one)))
+        (macro_stack (aggr_get (state zero)))
+        (macro_lookup (builtin_eval macro_lookup))
+        (aggr_slice_get (builtin_import aggr_slice_get))
+        (macro_ident (call (aggr_slice_get (subtree zero))))
+        (tree_start (aggr_get (subtree zero)))
+        (tree_start (add (tree_start one)))
+        (subtree (aggr_set (subtree zero tree_start)))
+        (curr_macro (call (macro_lookup (macro_stack macro_ident))))
+        (return (call (curr_macro (state subtree))))
+    )
+);
+
+// (macro_stack ident) -> macro
+// macro_stack: Vec<(ident macro)>
+#[rustfmt::skip]
+static MACRO_LOOKUP: Value = cera_desugared!(
+    (
+        (aggr_vec_borrow_slice b"aggr_vec_borrow_slice")
+        (aggr_slice_fold b"aggr_slice_fold")
+        (zero [0])
+        (one [1])
+        (macro_lookup_step {MACRO_LOOKUP_STEP})
+    )
+    (
+        (aggr_vec_borrow_slice (builtin_import aggr_vec_borrow_slice))
+        (aggr_slice_fold (builtin_import aggr_slice_fold))
+        (macro_lookup_step (builtin_eval macro_lookup_step))
+        (macro_stack (aggr_get (arg zero)))
+        (ident (aggr_get (arg one)))
+        (macro_slice (call (aggr_vec_borrow_slice macro_stack)))
+        (res (call (aggr_slice_fold (macro_slice (ident ()) macro_lookup_step))))
+        (return (aggr_get (res one)))
+    )
+);
+
+// ((ident found) (curr_ident curr_macro)) -> (ident found)
+#[rustfmt::skip]
+static MACRO_LOOKUP_STEP: Value = cera_desugared!(
+    (
+        (zero [0])
+        (one [1])
+        (identity b"identity")
+    )
+    (
+        (acc (aggr_get (arg zero)))
+        (elem (aggr_get (arg one)))
+        (ident (aggr_get (acc zero)))
+        (found (aggr_get (acc one)))
+        (curr_ident (aggr_get (elem zero)))
+        (curr_macro (aggr_get (elem one)))
+        (is_eq (bytes_eq (curr_ident ident)))
+        (found (if (is_eq (identity curr_macro) (identity found))))
+        (return (identity (ident found)))
     )
 );

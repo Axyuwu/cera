@@ -141,7 +141,7 @@ impl BuiltinFunc {
                 debug_assert!(&**magic.as_bytes() == b"closure");
                 Let::call::<IS_CONST_FOLD>(func, Value::aggregate_move([captured, arg]), world)
             }
-            _ => panic!(),
+            _ => panic!("{}", Value::Aggregate(func)),
         }
     }
     fn poll_if(value: Value) -> FuncThunk {
