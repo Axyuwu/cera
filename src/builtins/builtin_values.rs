@@ -1517,12 +1517,11 @@ macro_rules! cera_desugared {
     };
 }
 
-// (state tree) -> value
+// (state tree) -> state
 //
 // state: (macro_stack ..)
 // macro_lookup: Vec<(name macro)>
 // macro: (state rem_tree) -> state
-// postproc: state -> value
 #[rustfmt::skip]
 static EXTENSIBLE_EVAL: Value = cera_desugared!(
     (

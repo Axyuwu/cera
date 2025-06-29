@@ -11,6 +11,27 @@ use std::{
 
 use super::cache_lock::CacheLock;
 
+#[macro_export]
+macro_rules! static_arc {
+    ($data:expr, $data_t:ty) => {
+        static_arc!($data, $data_t, (), ())
+    };
+    ($data:expr, $data_t:ty, $cache:expr, $cache_t:ty) => {{
+        static mut STORAGE: $crate::utils::sync::cache_arc::CacheArcInner<$data_t, $cache_t> =
+            $crate::utils::sync::cache_arc::CacheArcInner {
+                cache: $cache,
+                count: ::std::sync::atomic::AtomicUsize::new(1),
+                data: $data,
+            };
+        let val = crate::utils::sync::cache_arc::CacheArc {
+            inner: unsafe { ::std::ptr::NonNull::new_unchecked(::std::ptr::addr_of_mut!(STORAGE)) },
+            _phantom: ::std::marker::PhantomData,
+        };
+        val.increment_leak();
+        val
+    }};
+}
+
 pub trait CacheArcCache {
     fn init() -> Self;
 }
@@ -56,11 +77,7 @@ const MAX_REFCOUNT: usize = (isize::MAX) as usize;
 
 impl<T: ?Sized, C> Clone for CacheArc<T, C> {
     fn clone(&self) -> Self {
-        let old_size = self.inner().count.fetch_add(1, Ordering::Relaxed);
-
-        if old_size > MAX_REFCOUNT {
-            std::process::abort();
-        }
+        self.increment_leak();
 
         Self {
             inner: self.inner,
@@ -70,7 +87,6 @@ impl<T: ?Sized, C> Clone for CacheArc<T, C> {
 }
 
 impl<T: ?Sized, C> Drop for CacheArc<T, C> {
-    #[inline]
     fn drop(&mut self) {
         // This only needs to ensure memory accesses that happen before stay before on the happy
         // path
@@ -88,26 +104,25 @@ impl<T: ?Sized, C> Drop for CacheArc<T, C> {
 }
 
 impl<T: ?Sized, C> CacheArc<T, C> {
-    #[inline]
     pub fn cache(this: &Self) -> &C {
         &Self::inner(this).cache
     }
+
     /// Returns whether this is the only arc pointing to that data, with Acquire ordering
     /// As we do not have weak references, this means this arc can be safely used mutably so long
     /// as it is not cloned or otherwise made to no longer be unique
-    #[inline]
     pub fn is_unique(this: &Self) -> bool {
         this.inner().count.load(Ordering::Acquire) == 1
     }
-    #[inline]
+
     pub fn get_mut(this: &mut Self) -> Option<&mut T>
     where
         C: CacheArcCache,
     {
         Self::is_unique(this).then(|| unsafe { Self::mut_unchecked(this) })
     }
+
     /// Saftey: this must be the only copy of this arc
-    #[inline]
     pub unsafe fn mut_unchecked(this: &mut Self) -> &mut T
     where
         C: CacheArcCache,
@@ -116,7 +131,7 @@ impl<T: ?Sized, C> CacheArc<T, C> {
         data.cache = C::init();
         &mut data.data
     }
-    #[inline]
+
     fn inner(&self) -> &CacheArcInner<T, C> {
         unsafe { &*self.inner.as_ptr() }
     }
@@ -128,7 +143,6 @@ impl<T: ?Sized, C> CacheArc<T, C> {
     }
 
     /// Safety: it must be valid to cast a box of the same type
-    #[inline]
     pub unsafe fn cast<U>(this: Self) -> CacheArc<U, C> {
         let Self { inner, _phantom } = this;
         std::mem::forget(this);
@@ -140,7 +154,6 @@ impl<T: ?Sized, C> CacheArc<T, C> {
     }
 
     /// Safety: it must be valid to cast a box of the same type
-    #[inline]
     pub unsafe fn cast_cache<U>(this: Self) -> CacheArc<T, U> {
         let Self { inner, _phantom } = this;
         std::mem::forget(this);
@@ -150,11 +163,18 @@ impl<T: ?Sized, C> CacheArc<T, C> {
             _phantom: PhantomData,
         }
     }
+
+    pub fn increment_leak(&self) {
+        let old_size = self.inner().count.fetch_add(1, Ordering::Relaxed);
+
+        if old_size > MAX_REFCOUNT {
+            std::process::abort();
+        }
+    }
 }
 
 impl<T, C> CacheArc<T, C> {
     /// Safety: value must be initliazed
-    #[inline]
     pub unsafe fn assume_init(this: CacheArc<MaybeUninit<T>, C>) -> Self
     where
         T: Sized,
@@ -177,6 +197,7 @@ impl<T, C> CacheArc<T, C> {
             _phantom: PhantomData,
         }
     }
+
     pub fn new_uninit() -> CacheArc<MaybeUninit<T>, C>
     where
         C: CacheArcCache,
@@ -192,7 +213,7 @@ impl<T, C> CacheArc<T, C> {
             _phantom: PhantomData,
         }
     }
-    #[inline]
+
     pub fn unwrap_or_clone(this: Self) -> T
     where
         T: Clone,
@@ -208,7 +229,6 @@ impl<T, C> CacheArc<T, C> {
 
         res
     }
-    #[inline]
     pub fn make_mut(this: &mut Self) -> &mut T
     where
         T: Clone,
@@ -302,7 +322,6 @@ impl<T: Sized, C> CacheArc<[T], C> {
         // Safety: we just initialized it
         unsafe { Self::assume_init(res) }
     }
-    #[inline]
     pub fn make_mut(this: &mut Self) -> &mut [T]
     where
         T: Clone,
@@ -319,7 +338,6 @@ impl<T: Sized, C> CacheArc<[T], C> {
 impl<T: ?Sized, C> Deref for CacheArc<T, C> {
     type Target = T;
 
-    #[inline]
     fn deref(&self) -> &Self::Target {
         &Self::inner(self).data
     }
@@ -335,7 +353,6 @@ impl<T: ?Sized, C> AsRef<T> for CacheArc<T, C> {
 pub struct TryFromSliceError(());
 
 impl std::fmt::Display for TryFromSliceError {
-    #[inline]
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         "could not convert slice to array".fmt(f)
     }
@@ -398,7 +415,6 @@ impl<const SIZE: usize, T, C: CacheArcCache> From<[T; SIZE]> for CacheArc<[T], C
 }
 
 impl<T, C: CacheArcCache> FromIterator<T> for CacheArc<[T], C> {
-    #[inline]
     fn from_iter<I: IntoIterator<Item = T>>(iter: I) -> Self {
         let mut acc = iter.into_iter().collect::<Vec<_>>();
         // Safety: we forget the data right after

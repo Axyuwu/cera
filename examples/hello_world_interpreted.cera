@@ -1,8 +1,10 @@
 (
     (extensible_eval "extensible_eval")
     (func_desugar_basic_aggr "func_desugar_basic_aggr")
-    (example_tree ("\x00" "\x02" (
+    (example_tree ("\x00" "\x04" (
         ("\x00" "\x02" (example (hai hello hai)))
+        ("\x00" "\x03" (example macro_two multi_arg))
+        ("\x00" "\x03" (example macro_two multi_arg))
         ("\x00" "\x03" (example macro_two multi_arg))
     )))
     (zero "\x00")
