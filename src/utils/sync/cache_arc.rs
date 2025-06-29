@@ -24,7 +24,7 @@ macro_rules! static_arc {
                 data: $data,
             };
         let val = crate::utils::sync::cache_arc::CacheArc {
-            inner: unsafe { ::std::ptr::NonNull::new_unchecked(::std::ptr::addr_of_mut!(STORAGE)) },
+            inner: unsafe { ::std::ptr::NonNull::new_unchecked(&raw mut STORAGE) },
             _phantom: ::std::marker::PhantomData,
         };
         val.increment_leak();
