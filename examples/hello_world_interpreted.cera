@@ -4,7 +4,8 @@
     (import_func (
         ()
         (
-            (return (builtin_import arg))
+            (imported (builtin_import arg))
+            (return (identity (arg imported)))
         )
     ))
     (builtins (
