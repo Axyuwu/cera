@@ -1,45 +1,60 @@
 (
-    (extensible_eval "extensible_eval")
+    (aggr_map "aggr_map")
     (func_desugar_basic_aggr "func_desugar_basic_aggr")
-    (example_tree ("\x00" "\x04" (
-        ("\x00" "\x02" (example (hai hello hai)))
-        ("\x00" "\x03" (example macro_two multi_arg))
-        ("\x00" "\x03" (example macro_two multi_arg))
-        ("\x00" "\x03" (example macro_two multi_arg))
-    )))
-    (zero "\x00")
-    (one "\x01")
-    (example_macro (
+    (import_func (
+        ()
         (
-            (zero "\x00")
-            (one "\x01")
-            (aggr_vec_push "aggr_vec_push")
-            (aggr_slice_to_aggr "aggr_slice_to_aggr")
-        )
-        (
-            (aggr_vec_push (builtin_import aggr_vec_push))
-            (aggr_slice_to_aggr (builtin_import aggr_slice_to_aggr))
-            (state (aggr_get (arg zero)))
-            (rem_tree (aggr_get (arg one)))
-            (rem_tree (call (aggr_slice_to_aggr rem_tree)))
-            (macros (aggr_get (state zero)))
-            (stack (aggr_get (state one)))
-            (stack (call (aggr_vec_push (stack rem_tree))))
-            (return (identity (macros stack)))
+            (return (builtin_import arg))
         )
     ))
-    (example_macro_name "example")
-    (aggr_vec_init "aggr_vec_init")
+    (builtins (
+        builtin_eval_func
+        aggr_map
+        aggr_slice_get
+        aggr_slice_try_get
+        bool_then
+        bool_then_some
+        some_new
+        none
+        pipe
+        compose
+        bool_not
+        aggr_slice_new
+        aggr_slice_buf
+        aggr_slice_try_set
+        aggr_slice_set
+        aggr_slice_len
+        aggr_slice_is_empty
+        aggr_slice_map_fold
+        aggr_slice_map
+        aggr_slice_fold
+        aggr_slice_copy
+        aggr_slice_to_aggr
+        aggr_vec_borrow_slice
+        aggr_vec_unborrow_slice
+        aggr_vec_init
+        aggr_vec_push
+        aggr_vec_reserve
+        aggr_vec_pop
+        min
+        max
+        true
+        false
+        cmp_less
+        cmp_equal
+        cmp_greater
+        type_aggr
+        type_bytes
+        func_desugar_basic
+        func_desugar_basic_aggr
+        extensible_eval
+    ))
 )
 (
-    (extensible_eval (builtin_import extensible_eval))
-    (extensible_eval (builtin_eval extensible_eval))
+    (aggr_map (builtin_import aggr_map))
     (func_desugar_basic_aggr (builtin_import func_desugar_basic_aggr))
     (func_desugar_basic_aggr (builtin_eval func_desugar_basic_aggr))
-    (example_macro (call (func_desugar_basic_aggr example_macro)))
-    (macro_stack (identity (one ((example_macro_name example_macro)))))
-    (aggr_vec_init (builtin_import aggr_vec_init))
-    (res (call (extensible_eval ((macro_stack aggr_vec_init) example_tree))))
-    (return (aggr_get (res one)))
+    (import_func (call (func_desugar_basic_aggr import_func)))
+    (return (call (aggr_map (builtins import_func))))
 )
 
