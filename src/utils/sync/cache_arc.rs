@@ -171,6 +171,13 @@ impl<T: ?Sized, C> CacheArc<T, C> {
             std::process::abort();
         }
     }
+
+    /// Safety: The resulting value should *never* be dropped, as it simply copies the bytes of
+    /// self
+    /// This is intended to be placed directly into a static memory location
+    pub const unsafe fn copy_non_incrementing(&'static self) -> Self {
+        unsafe { std::ptr::read(self) }
+    }
 }
 
 impl<T, C> CacheArc<T, C> {
