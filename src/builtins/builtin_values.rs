@@ -137,7 +137,7 @@ pub static BUILTIN_EVAL_FUNC: Value = cera!(
 // 0: self
 // 1: 0
 // 2: 1
-// 3: AGGR_MAP
+// 3: "aggr_map"
 // 4: "aggregate"
 // 5: "call"
 // 6: "identity"
@@ -145,16 +145,18 @@ pub static BUILTIN_EVAL_FUNC: Value = cera!(
 // 8: type
 // 9: value
 // 10: type == "aggregate"
-// if 10 (call (AGGR_MAP (value self)))) else (identity value)
+// 11: builtin_import 3
+// if 10 (call (11 (value self)))) else (identity value)
 #[rustfmt::skip]
 static ATOM_VALUE_TO_EVALUATABLE: Value = cera!(
-    ([0] [1] {AGGR_MAP} aggregate call identity)
+    ([0] [1] aggr_map aggregate call identity)
     (
         (aggr_get ([7] [1]))
         (aggr_get ([7] [2]))
         (bytes_eq ([8] [4]))
+        (builtin_import [3])
         (if ([10]
-            ([5] ([3] ([9] [0])))
+            ([5] ([11] ([9] [0])))
             ([6] [9])
         ))
     )
@@ -165,30 +167,36 @@ static ATOM_VALUE_TO_EVALUATABLE: Value = cera!(
 // 0: self
 // 1: 0
 // 2: 1
-// 3: AGGR_SLICE_NEW
-// 4: AGGR_SLICE_MAP
-// 5: AGGR_SLICE_BUF
+// 3: aggr_slice_new
+// 4: aggr_slice_map
+// 5: aggr_slice_buf
 // 6: arg
 // 7: aggr (aggr_get (arg 0))
 // 8: func (aggr_get (arg 1))
-// 9: slice (call (AGGR_SLICE_NEW aggr))
-// 10: slice2 (call (AGGR_SLICE_MAP (slice func)))
-// call (AGGR_SLICE_BUF slice2)
+// 9: builtin_import 3
+// 10: builtin_import 4
+// 11: builtin_import 5
+// 12: slice (call (9 aggr))
+// 13: slice2 (call (10 (slice func)))
+// call (11 slice2)
 #[rustfmt::skip]
 static AGGR_MAP: Value = cera!(
     (
         [0]
         [1]
-        {AGGR_SLICE_NEW}
-        {AGGR_SLICE_MAP}
-        {AGGR_SLICE_BUF}
+        aggr_slice_new
+        aggr_slice_map
+        aggr_slice_buf
     )
     (
         (aggr_get ([6] [1]))
         (aggr_get ([6] [2]))
-        (call ([3] [7]))
-        (call ([4] ([9] [8])))
-        (call ([5] [10]))
+        (builtin_import [3])
+        (builtin_import [4])
+        (builtin_import [5])
+        (call ([9] [7]))
+        (call ([10] ([12] [8])))
+        (call ([11] [13]))
     )
 );
 
@@ -258,7 +266,7 @@ static AGGR_SLICE_GET: Value = cera!(
 // 1: 0
 // 2: 1
 // 3: 2
-// 4: BOOL_THEN
+// 4: bool_then
 // 5: aggr_get
 // 6: arg
 // 7: slice (aggr_get (arg 0))
@@ -270,10 +278,11 @@ static AGGR_SLICE_GET: Value = cera!(
 // 13: len (aggr_len buf)
 // 14: bounds_check (cmp (idx_real len))
 // 15: is_in_bounds (eq (0 bounds_check))
-// call (BOOL_THEN (is_in_bounds (aggr_get (buf idx_real))))
+// 16: builtin_import "bool_then"
+// call (16 (is_in_bounds (aggr_get (buf idx_real))))
 #[rustfmt::skip]
 static AGGR_SLICE_TRY_GET: Value = cera!(
-    ([0] [1] [2] {BOOL_THEN} aggr_get)
+    ([0] [1] [2] bool_then aggr_get)
     (
         (aggr_get ([6] [1]))
         (aggr_get ([6] [2]))
@@ -284,7 +293,8 @@ static AGGR_SLICE_TRY_GET: Value = cera!(
         (aggr_len [11])
         (cmp ([12] [13]))
         (eq ([1] [14]))
-        (call ([4] ([15] ([5] ([11] [12])))))
+        (builtin_import [4])
+        (call ([16] ([15] ([5] ([11] [12])))))
     )
 );
 
@@ -330,8 +340,8 @@ static AGGR_SLICE_SET: Value = cera!(
 // 1: 0
 // 2: 1
 // 3: 2
-// 4: BOOL_THEN_SOME
-// 5: BOOL_NOT
+// 4: bool_then_some
+// 5: bool_not
 // 6: aggr_set
 // 7: identity
 // 8: arg
@@ -346,8 +356,10 @@ static AGGR_SLICE_SET: Value = cera!(
 // 17: bounds_check (cmp (idx_real len))
 // 18: is_in_bounds (eq (0 bounds_check))
 // 19: buf2 (if (is_in_bounds (aggr_set (buf idx_real value)) (identity buf)))
-// 20: is_not_in_bounds (BOOL_NOT is_in_bounds)
-// 21: value_rem (call (BOOL_THEN_SOME (is_not_in_bounds value)))
+// 20: bool_then_some (builtin_import bool_then_some)
+// 21: bool_not (builtin_import bool_not)
+// 20: is_not_in_bounds (call (bool_not is_in_bounds))
+// 21: value_rem (call (bool_then_some (is_not_in_bounds value)))
 // identity ((start end buf2) value_rem)
 #[rustfmt::skip]
 static AGGR_SLICE_TRY_SET: Value = cera!(
@@ -355,8 +367,8 @@ static AGGR_SLICE_TRY_SET: Value = cera!(
         [0]
         [1]
         [2]
-        {BOOL_THEN_SOME}
-        {BOOL_NOT}
+        bool_then_some
+        bool_not
         aggr_set
         identity
     )
@@ -375,9 +387,11 @@ static AGGR_SLICE_TRY_SET: Value = cera!(
             ([6] ([14] [15] [11]))
             ([7] [14])
         ))
-        (call ([5] [18]))
-        (call ([4] ([20] [11])))
-        (identity (([12] [13] [19]) [21]))
+        (builtin_import [4])
+        (builtin_import [5])
+        (call ([21] [18]))
+        (call ([20] ([22] [11])))
+        (identity (([12] [13] [19]) [23]))
     )
 );
 
@@ -454,37 +468,41 @@ static AGGR_SLICE_MAP_FOLD: Value = cera!(
 // 0: self
 // 1: 0
 // 2: 1
-// 3: AGGR_SLICE_IS_EMPTY
+// 3: aggr_slice_is_empty
 // 4: identity
 // 5: call
-// 6: PIPE
+// 6: pipe
 // 7: AGGR_SLICE_MAP_FOLD_STEP
 // 8: arg
 // 9: slice (aggr_get (arg 0))
 // 10: acc (aggr_get (arg 1))
-// 11: is_empty (call (AGGR_SLICE_IS_EMPTY slice))
+// 11: aggr_slice_is_empty
+// 12: is_empty (call (AGGR_SLICE_IS_EMPTY slice))
+// 13: pipe (builtin_import pipe)
 // if (is_empty
 //      (identity (slice acc))
-//      (call (PIPE ((call (AGGR_SLICE_MAP_FOLD_STEP arg)) self)))
+//      (call (pipe ((call (AGGR_SLICE_MAP_FOLD_STEP arg)) self)))
 // )
 #[rustfmt::skip]
 static AGGR_SLICE_MAP_FOLD_INNER: Value = cera!(
     (
         [0]
         [1]
-        {AGGR_SLICE_IS_EMPTY}
+        aggr_slice_is_empty
         identity
         call
-        {PIPE}
+        pipe
         {AGGR_SLICE_MAP_FOLD_STEP}
     )
     (
         (aggr_get ([8] [1]))
         (aggr_get ([8] [2]))
-        (call ([3] [9]))
-        (if ([11]
+        (builtin_import [3])
+        (call ([11] [9]))
+        (builtin_import [6])
+        (if ([12]
             ([4] ([9] [10]))
-            ([5] ([6] (([5] ([7] [8])) [0])))
+            ([5] ([13] (([5] ([7] [8])) [0])))
         ))
     )
 );
@@ -495,21 +513,23 @@ static AGGR_SLICE_MAP_FOLD_INNER: Value = cera!(
 // 1: 0
 // 2: 1
 // 3: 2
-// 4: AGGR_SLICE_GET
-// 5: AGGR_SLICE_SET
+// 4: aggr_slice_get
+// 5: aggr_slice_set
 // 6: arg
 // 7: slice (aggr_get (arg 0))
 // 8: acc (aggr_get (arg 1))
 // 9: func (aggr_get (arg 2))
-// 10: elem (call (AGGR_SLICE_GET (slice 0)))
-// 11: slice2 (call (AGGR_SLICE_SET (slice 0 ())))
-// 12: func_ret (call (func (acc elem)))
-// 13: acc2 (aggr_get (func_ret 0))
-// 14: elem2 (aggr_get (func_ret 1))
-// 15: slice3 (call (AGGR_SLICE_SET (slice2 0 elem2)))
-// 16: start (aggr_get (slice3 0))
-// 17: start2 (add (start 1))
-// 18: slice4 (aggr_set (slice3 0 start2))
+// 10: aggr_slice_get (builtin_import aggr_slice_get)
+// 11: aggr_slice_set (builtin_import aggr_slice_set)
+// 12: elem (call (aggr_slice_get (slice 0)))
+// 13: slice2 (call (aggr_slice_set (slice 0 ())))
+// 14: func_ret (call (func (acc elem)))
+// 15: acc2 (aggr_get (func_ret 0))
+// 16: elem2 (aggr_get (func_ret 1))
+// 17: slice3 (call (aggr_slice_set (slice2 0 elem2)))
+// 18: start (aggr_get (slice3 0))
+// 19: start2 (add (start 1))
+// 20: slice4 (aggr_set (slice3 0 start2))
 // identity (slice4 acc2 func)
 #[rustfmt::skip]
 static AGGR_SLICE_MAP_FOLD_STEP: Value = cera!(
@@ -517,23 +537,25 @@ static AGGR_SLICE_MAP_FOLD_STEP: Value = cera!(
         [0]
         [1]
         [2]
-        {AGGR_SLICE_GET}
-        {AGGR_SLICE_SET}
+        aggr_slice_get
+        aggr_slice_set
     )
     (
         (aggr_get ([6] [1]))
         (aggr_get ([6] [2]))
         (aggr_get ([6] [3]))
-        (call ([4] ([7] [1])))
-        (call ([5] ([7] [1] ())))
-        (call ([9] ([8] [10])))
-        (aggr_get ([12] [1]))
-        (aggr_get ([12] [2]))
-        (call ([5] ([11] [1] [14])))
-        (aggr_get ([15] [1]))
-        (add ([16] [2]))
-        (aggr_set ([15] [1] [17]))
-        (identity ([18] [13] [9]))
+        (builtin_import [4])
+        (builtin_import [5])
+        (call ([10] ([7] [1])))
+        (call ([11] ([7] [1] ())))
+        (call ([9] ([8] [12])))
+        (aggr_get ([14] [1]))
+        (aggr_get ([14] [2]))
+        (call ([11] ([13] [1] [16])))
+        (aggr_get ([17] [1]))
+        (add ([18] [2]))
+        (aggr_set ([17] [1] [19]))
+        (identity ([20] [15] [9]))
     )
 );
 
@@ -542,34 +564,38 @@ static AGGR_SLICE_MAP_FOLD_STEP: Value = cera!(
 // 0: self
 // 1: 0
 // 2: 1
-// 3: AGGR_SLICE_MAP_FOLD
-// 4: COMPOSE
+// 3: aggr_slice_map_fold
+// 4: compose
 // 5: ((1)((aggr_get (2 1))))
 // 6: (()((identity (() 1))))
 // 7: arg
 // 8: slice (aggr_get (arg 0))
 // 9: func (aggr_get (arg 1))
-// 10: func2 (call (COMPOSE ([5] func)))
-// 11: func3 (call (COMPOSE (func2 [6])))
-// 12: res (call (AGGR_SLICE_MAP_FOLD (slice () func3)))
+// 10: aggr_slice_map_fold (builtin_import aggr_slice_map_fold)
+// 11: compose (builtin_import compose)
+// 12: func2 (call (compose ([5] func)))
+// 13: func3 (call (compose (func2 [6])))
+// 14: res (call (aggr_slice_map_fold (slice () func3)))
 // aggr_get (res 0)
 #[rustfmt::skip]
 static AGGR_SLICE_MAP: Value = cera!(
     (
         [0]
         [1]
-        {AGGR_SLICE_MAP_FOLD}
-        {COMPOSE}
+        aggr_slice_map_fold
+        compose
         (([1])((aggr_get ([2] [1]))))
         (()((identity (() [1]))))
     )
     (
         (aggr_get ([7] [1]))
         (aggr_get ([7] [2]))
-        (call ([4] ([5] [9])))
-        (call ([4] ([10] [6])))
-        (call ([3] ([8] () [11])))
-        (aggr_get ([12] [1]))
+        (builtin_import [3])
+        (builtin_import [4])
+        (call ([11] ([5] [9])))
+        (call ([11] ([12] [6])))
+        (call ([10] ([8] () [13])))
+        (aggr_get ([14] [1]))
     )
 );
 
@@ -578,37 +604,41 @@ static AGGR_SLICE_MAP: Value = cera!(
 // 0: self
 // 1: 0
 // 2: 1
-// 3: AGGR_SLICE_IS_EMPTY
+// 3: aggr_slice_is_empty
 // 4: identity
 // 5: call
-// 6: PIPE
+// 6: pipe
 // 7: AGGR_SLICE_FOLD_STEP
 // 8: arg
 // 9: slice (aggr_get (arg 0))
 // 10: acc (aggr_get (arg 1))
-// 11: is_empty (call (AGGR_SLICE_IS_EMPTY slice))
+// 11: aggr_slice_is_empty (builtin_import aggr_slice_is_empty)
+// 12: pipe (builtin_import pipe)
+// 13: is_empty (call (aggr_slice_is_empty slice))
 // if (is_empty
 //      (identity acc)
-//      (call (PIPE ((call (AGGR_SLICE_FOLD_STEP arg)) self)))
+//      (call (pipe ((call (AGGR_SLICE_FOLD_STEP arg)) self)))
 // )
 #[rustfmt::skip]
 static AGGR_SLICE_FOLD: Value = cera!(
     (
         [0]
         [1]
-        {AGGR_SLICE_IS_EMPTY}
+        aggr_slice_is_empty
         identity
         call
-        {PIPE}
+        pipe
         {AGGR_SLICE_FOLD_STEP}
     )
     (
         (aggr_get ([8] [1]))
         (aggr_get ([8] [2]))
-        (call ([3] [9]))
-        (if ([11]
+        (builtin_import [3])
+        (builtin_import [6])
+        (call ([11] [9]))
+        (if ([13]
             ([4] [10])
-            ([5] ([6] (([5] ([7] [8])) [0])))
+            ([5] ([12] (([5] ([7] [8])) [0])))
         ))
     )
 );
@@ -619,14 +649,15 @@ static AGGR_SLICE_FOLD: Value = cera!(
 // 1: 0
 // 2: 1
 // 3: 2
-// 4: AGGR_SLICE_GET
+// 4: aggr_slice_get
 // 5: arg
 // 6: slice (aggr_get (arg 0))
 // 7: acc (aggr_get (arg 1))
 // 8: func (aggr_get (arg 2))
 // 9: arg2 (aggr_set (arg 0 ()))
 // 10: arg3 (aggr_set (arg2 1 ()))
-// 11: elem (call (AGGR_SLICE_GET (slice 0)))
+// 11: aggr_slice_get (builtin_import aggr_slice_get)
+// 11: elem (call (aggr_slice_get (slice 0)))
 // 12: acc2 (call (func (acc elem)))
 // 13: arg4 (aggr_set (arg3 1 acc2))
 // 14: start (aggr_get (slice 0))
@@ -635,20 +666,21 @@ static AGGR_SLICE_FOLD: Value = cera!(
 // aggr_set (arg4 0 slice2)
 #[rustfmt::skip]
 static AGGR_SLICE_FOLD_STEP: Value = cera!(
-    ([0] [1] [2] {AGGR_SLICE_GET})
+    ([0] [1] [2] aggr_slice_get)
     (
         (aggr_get ([5] [1]))
         (aggr_get ([5] [2]))
         (aggr_get ([5] [3]))
         (aggr_set ([5] [1] ()))
         (aggr_set ([9] [2] ()))
-        (call ([4] ([6] [1])))
-        (call ([8] ([7] [11])))
-        (aggr_set ([10] [2] [12]))
+        (builtin_import [4])
+        (call ([11] ([6] [1])))
+        (call ([8] ([7] [12])))
+        (aggr_set ([10] [2] [13]))
         (aggr_get ([6] [1]))
-        (add ([14] [2]))
-        (aggr_set ([6] [1] [15]))
-        (aggr_set ([13] [1] [16]))
+        (add ([15] [2]))
+        (aggr_set ([6] [1] [16]))
+        (aggr_set ([14] [1] [17]))
     )
 );
 
@@ -687,26 +719,30 @@ static AGGR_SLICE_COPY: Value = cera!(
 // 6: call
 // 7: arg
 // 8: dst (aggr_get (arg 1))
-// 9: is_empty (call (AGGR_SLICE_IS_EMPTY dst))
-// 10: tail (call (COMPOSE (AGGR_SLICE_COPY_STEP self)))
+// 9: aggr_slice_is_empty (buitlin_import aggr_slice_is_empty)
+// 10: compose (builtin_import compose)
+// 11: is_empty (call (aggr_slice_is_empty dst))
+// 12: tail (call (compose (AGGR_SLICE_COPY_STEP self)))
 // if (is_empty (identity dst) (call (tail arg)))
 #[rustfmt::skip]
 static AGGR_SLICE_COPY_INNER: Value = cera!(
     (
         [1]
-        {AGGR_SLICE_IS_EMPTY}
-        {COMPOSE}
+        aggr_slice_is_empty
+        compose
         {AGGR_SLICE_COPY_STEP}
         identity
         call
     )
     (
         (aggr_get ([7] [1]))
-        (call ([2] [8]))
-        (call ([3] ([4] [0])))
-        (if ([9]
+        (builtin_import [2])
+        (builtin_import [3])
+        (call ([9] [8]))
+        (call ([10] ([4] [0])))
+        (if ([11]
             ([5] [8])
-            ([6] ([10] [7]))
+            ([6] ([12] [7]))
         ))
     )
 );
@@ -721,35 +757,39 @@ static AGGR_SLICE_COPY_INNER: Value = cera!(
 // 5: arg
 // 6: src (aggr_get (arg 0))
 // 7: dst (aggr_get (arg 1))
-// 8: elem (call (AGGR_SLICE_GET (src 0)))
-// 9: dst2 (call (AGGR_SLICE_SET (dst 0 elem)))
-// 10: dst_start (aggr_get (dst2 0))
-// 11: dst_start2 (add (dst_start 1))
-// 12: dst3 (aggr_set (dst2 0 dst_start2))
-// 13: src_start (aggr_get (src 0))
-// 14: src_start2 (add (src_start 1))
-// 15: src2 (aggr_set (src 0 src_start2))
+// 8: aggr_slice_get (builtin_import aggr_slice_get)
+// 9: aggr_slice_set (builtin_import aggr_slice_set)
+// 10: elem (call (aggr_slice_get (src 0)))
+// 11: dst2 (call (aggr_slice_set (dst 0 elem)))
+// 12: dst_start (aggr_get (dst2 0))
+// 13: dst_start2 (add (dst_start 1))
+// 14: dst3 (aggr_set (dst2 0 dst_start2))
+// 15: src_start (aggr_get (src 0))
+// 16: src_start2 (add (src_start 1))
+// 17: src2 (aggr_set (src 0 src_start2))
 // identity (src2 dst3)
 #[rustfmt::skip]
 static AGGR_SLICE_COPY_STEP: Value = cera!(
     (
         [0]
         [1]
-        {AGGR_SLICE_GET}
-        {AGGR_SLICE_SET}
+        aggr_slice_get
+        aggr_slice_set
     )
     (
         (aggr_get ([5] [1]))
         (aggr_get ([5] [2]))
-        (call ([3] ([6] [1])))
-        (call ([4] ([7] [1] [8])))
-        (aggr_get ([9] [1]))
-        (add ([10] [2]))
-        (aggr_set ([9] [1] [11]))
+        (builtin_import [3])
+        (builtin_import [4])
+        (call ([8] ([6] [1])))
+        (call ([9] ([7] [1] [10])))
+        (aggr_get ([11] [1]))
+        (add ([12] [2]))
+        (aggr_set ([11] [1] [13]))
         (aggr_get ([6] [1]))
-        (add ([13] [2]))
-        (aggr_set ([6] [1] [14]))
-        (identity ([15] [12]))
+        (add ([15] [2]))
+        (aggr_set ([6] [1] [16]))
+        (identity ([17] [14]))
     )
 );
 
@@ -757,24 +797,30 @@ static AGGR_SLICE_COPY_STEP: Value = cera!(
 //
 // 0: self
 // 1: 0
-// 2: AGGR_SLICE_LEN
-// 3: AGGR_SLICE_COPY
-// 4: AGGR_SLICE_BUF
+// 2: aggr_slice_len
+// 3: aggr_slice_copy
+// 4: aggr_slice_buf
 // 5: arg
-// 6: len (call (AGGR_SLICE_LEN arg))
-// 7: buf (aggr_make len)
-// 8: slice (identity (0 len buf))
-// 9: slice2 (call (AGGR_SLICE_COPY (arg slice)))
-// call (AGGR_SLICE_BUF slice2)
+// 6: aggr_slice_len (builtin_import aggr_slice_len)
+// 7: aggr_slice_copy (builtin_import aggr_slice_copy)
+// 8: aggr_slice_buf (builtin_import aggr_slice_buf)
+// 9: len (call (aggr_slice_len arg))
+// 10: buf (aggr_make len)
+// 11: slice (identity (0 len buf))
+// 12: slice2 (call (aggr_slice_copy (arg slice)))
+// call (aggr_slice_buf slice2)
 #[rustfmt::skip]
 static AGGR_SLICE_TO_AGGR: Value = cera!(
-    ([0] {AGGR_SLICE_LEN} {AGGR_SLICE_COPY} {AGGR_SLICE_BUF})
+    ([0] aggr_slice_len aggr_slice_copy aggr_slice_buf)
     (
-        (call ([2] [5]))
-        (aggr_make [6])
-        (identity ([1] [6] [7]))
-        (call ([3] ([5] [8])))
-        (call ([4] [9]))
+        (builtin_import [2])
+        (builtin_import [3])
+        (builtin_import [4])
+        (call ([6] [5]))
+        (aggr_make [9])
+        (identity ([1] [9] [10]))
+        (call ([7] ([5] [11])))
+        (call ([8] [12]))
     )
 );
 
