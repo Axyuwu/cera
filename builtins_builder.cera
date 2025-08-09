@@ -1,0 +1,99 @@
+(
+    (aggr_slice_map aggr_slice_map)
+    (aggr_slice_new aggr_slice_new)
+    (aggr_slice_buf aggr_slice_buf)
+    (func_desugar_basic_aggr func_desugar_basic_aggr)
+    (import_func (
+        ()
+        (
+            (imported (builtin_import arg))
+            (return (identity (arg imported)))
+        )
+    ))
+    (reexports (
+        builtin_eval_func
+        aggr_map
+        aggr_slice_get
+        aggr_slice_try_get
+        bool_then
+        bool_then_some
+        some_new
+        none
+        pipe
+        compose
+        bool_not
+        aggr_slice_new
+        aggr_slice_buf
+        aggr_slice_try_set
+        aggr_slice_set
+        aggr_slice_len
+        aggr_slice_is_empty
+        aggr_slice_map_fold
+        aggr_slice_map
+        aggr_slice_fold
+        aggr_slice_copy
+        aggr_slice_to_aggr
+        aggr_vec_borrow_slice
+        aggr_vec_unborrow_slice
+        aggr_vec_init
+        aggr_vec_push
+        aggr_vec_reserve
+        aggr_vec_pop
+        min
+        max
+        true
+        false
+        cmp_less
+        cmp_equal
+        cmp_greater
+        type_aggr
+        type_bytes
+        func_desugar_basic
+        func_desugar_basic_aggr
+        extensible_eval
+    ))
+    (aggr_slice_concat_name aggr_slice_concat)
+    (aggr_slice_concat (
+        (
+            (aggr_slice_len aggr_slice_len)
+            (aggr_slice_fold aggr_slice_fold)
+            (aggr_vec_reserve aggr_vec_reserve)
+            (aggr_vec_init aggr_vec_init)
+            (aggr_vec_push aggr_vec_push)
+            (zero "\x00")
+            (one "\x01")
+        )
+        (
+            (lhs (aggr_get (arg zero)))
+            (rhs (aggr_get (arg one)))
+            (aggr_slice_len (builtin_import aggr_slice_len))
+            (aggr_slice_fold (builtin_import aggr_slice_fold))
+            (aggr_vec_reserve (builtin_import aggr_vec_reserve))
+            (aggr_vec_init (builtin_import aggr_vec_init))
+            (aggr_vec_push (builtin_import aggr_vec_push))
+            (lhs_len (call (aggr_slice_len lhs)))
+            (rhs_len (call (aggr_slice_len rhs)))
+            (res_len (add (lhs_len rhs_len)))
+            (acc (call (aggr_vec_reserve (aggr_vec_init res_len))))
+            (acc (call (aggr_slice_fold (lhs acc aggr_vec_push))))
+            (acc (call (aggr_slice_fold (rhs acc aggr_vec_push))))
+            (return (aggr_get (acc one)))
+        )
+    ))
+)
+(
+    (aggr_slice_map (builtin_import aggr_slice_map))
+    (aggr_slice_new (builtin_import aggr_slice_new))
+    (aggr_slice_buf (builtin_import aggr_slice_buf))
+    (func_desugar_basic_aggr (builtin_import func_desugar_basic_aggr))
+    (func_desugar_basic_aggr (builtin_eval func_desugar_basic_aggr))
+    (import_func (call (func_desugar_basic_aggr import_func)))
+    (reexports (call (aggr_slice_new reexports)))
+    (reexports (call (aggr_slice_map (reexports import_func))))
+    (aggr_slice_concat (call (func_desugar_basic_aggr aggr_slice_concat)))
+    (new_builtins (call (aggr_slice_new (
+        (aggr_slice_concat_name aggr_slice_concat)
+    ))))
+    (return (call (aggr_slice_concat (reexports new_builtins))))
+)
+
