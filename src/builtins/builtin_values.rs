@@ -1235,23 +1235,28 @@ static MAX: Value = cera!(
 // 1: 0
 // 2: 1
 // 3: FUNC_LOOKUP_STACK_MAKE
-// 4: AGGR_SLICE_TO_AGGR
-// 5: AGGR_MAP
+// 4: aggr_slice_to_aggr
+// 5: aggr_map
 // 6: GET_SECOND
-// 7: AGGR_SLICE_FOLD
-// 8: AGGR_VEC_INIT
+// 7: aggr_slice_fold
+// 8: aggr_vec_init
 // 9: FUNC_PUSH_EXPRESSION
-// 10: AGGR_VEC_BORROW_SLICE
+// 10: aggr_vec_borrow_slice
 // 11: arg
 // 12: constants (aggr_get (arg 0))
 // 13: intermediates (aggr_get (arg 1))
-// 14: lookup_stack (call (FUNC_LOOKUP_STACK_MAKE constants))
-// 15: constants_aggr (call (AGGR_SLICE_TO_AGGR constants))
-// 16: constants_raw (call (AGGR_MAP (constants_aggr GET_SECOND)))
-// 17: res (call (AGGR_SLICE_FOLD (intermediates (AGGR_VEC_INIT lookup_stack) FUNC_PUSH_EXPRESSION)))
-// 18: expressions_vec (aggr_get (res 0))
-// 19: expressions_raw_slice (call (AGGR_VEC_BORROW_SLICE expressions_vec))
-// 20: expressions_raw (call (AGGR_SLICE_TO_AGGR expressions_raw_slice))
+// 14: aggr_slice_to_aggr (builtin_import aggr_slice_to_aggr)
+// 15: aggr_map (builtin_import aggr_map)
+// 16: aggr_slice_fold (builtin_import aggr_slice_fold)
+// 17: aggr_vec_init (builtin_import aggr_vec_init)
+// 18: aggr_vec_borrow_slice (builtin_import aggr_vec_borrow_slice)
+// 19: lookup_stack (call (FUNC_LOOKUP_STACK_MAKE constants))
+// 10: constants_aggr (call (AGGR_SLICE_TO_AGGR constants))
+// 21: constants_raw (call (AGGR_MAP (constants_aggr GET_SECOND)))
+// 22: res (call (AGGR_SLICE_FOLD (intermediates (AGGR_VEC_INIT lookup_stack) FUNC_PUSH_EXPRESSION)))
+// 23: expressions_vec (aggr_get (res 0))
+// 24: expressions_raw_slice (call (AGGR_VEC_BORROW_SLICE expressions_vec))
+// 25: expressions_raw (call (AGGR_SLICE_TO_AGGR expressions_raw_slice))
 // identity (constants_raw expressions_raw)
 #[rustfmt::skip]
 static FUNC_DESUGAR_BASIC: Value = cera!(
@@ -1259,25 +1264,30 @@ static FUNC_DESUGAR_BASIC: Value = cera!(
         [0]
         [1]
         {FUNC_LOOKUP_STACK_MAKE}
-        {AGGR_SLICE_TO_AGGR}
-        {AGGR_MAP}
+        aggr_slice_to_aggr
+        aggr_map
         {GET_SECOND}
-        {AGGR_SLICE_FOLD}
-        {AGGR_VEC_INIT}
+        aggr_slice_fold
+        aggr_vec_init
         {FUNC_PUSH_EXPRESSION}
-        {AGGR_VEC_BORROW_SLICE}
+        aggr_vec_borrow_slice
     )
     (
         (aggr_get ([11] [1]))
         (aggr_get ([11] [2]))
+        (builtin_import [4])
+        (builtin_import [5])
+        (builtin_import [7])
+        (builtin_import [8])
+        (builtin_import [10])
         (call ([3] [12]))
-        (call ([4] [12]))
-        (call ([5] ([15] [6])))
-        (call ([7] ([13] ([8] [14]) [9])))
-        (aggr_get ([17] [1]))
-        (call ([10] [18]))
-        (call ([4] [19]))
-        (identity ([16] [20]))
+        (call ([14] [12]))
+        (call ([15] ([20] [6])))
+        (call ([16] ([13] ([17] [19]) [9])))
+        (aggr_get ([22] [1]))
+        (call ([18] [23]))
+        (call ([14] [24]))
+        (identity ([21] [25]))
     )
 );
 
@@ -1296,12 +1306,13 @@ static FUNC_DESUGAR_BASIC: Value = cera!(
 // 10: name (aggr_get (intermediate 0))
 // 11: expr (aggr_get (intermediate 1))
 // 12: expr_raw (call (FUNC_EXPRESSION_MAP (lookup_stack expr)))
-// 13: expressions_vec2 (call (AGGR_VEC_PUSH (expressions_vec expr_raw)))
-// 14: lookup_stack2 (call (AGGR_VEC_PUSH (lookup_stack name)))
+// 13: aggr_vec_push (builtin_import aggr_vec_push)
+// 14: expressions_vec2 (call (AGGR_VEC_PUSH (expressions_vec expr_raw)))
+// 15: lookup_stack2 (call (AGGR_VEC_PUSH (lookup_stack name)))
 // identity (expressions_vec2 lookup_stack2)
 #[rustfmt::skip]
 static FUNC_PUSH_EXPRESSION: Value = cera!(
-    ([0] [1] {FUNC_EXPRESSION_MAP} {AGGR_VEC_PUSH})
+    ([0] [1] {FUNC_EXPRESSION_MAP} aggr_vec_push)
     (
         (aggr_get ([5] [1]))
         (aggr_get ([5] [2]))
@@ -1310,11 +1321,10 @@ static FUNC_PUSH_EXPRESSION: Value = cera!(
         (aggr_get ([7] [1]))
         (aggr_get ([7] [2]))
         (call ([3] ([9] [11])))
-        (call ([4] ([8] [12])))
-        (call ([4] ([9] [10])))
-        (identity [8])
-        (identity [9])
-        (identity ([13] [14]))
+        (builtin_import [4])
+        (call ([13] ([8] [12])))
+        (call ([13] ([9] [10])))
+        (identity ([14] [15]))
     )
 );
 
@@ -1331,23 +1341,29 @@ static GET_SECOND: Value = cera!(([1]) ((aggr_get ([2] [1]))));
 // 5: FUNC_LOOKUP_STACK_PUSH
 // 6: "arg"
 // 7: arg
-// 8: lookup_stack (call (AGGR_VEC_PUSH (AGGR_VEC_INIT "self")))
-// 9: lookup_stack2 (call (AGGR_SLICE_FOLD (arg lookup_stack FUNC_LOOKUP_STACK_PUSH)))
-// call (AGGR_VEC_PUSH (lookup_stack2 "arg"))
+// 8: aggr_vec_push (builtin_import aggr_vec_push)
+// 9: aggr_vec_init (builtin_import aggr_vec_init)
+// 10: aggr_slice_fold (builtin_import aggr_slice_fold)
+// 11: lookup_stack (call (aggr_vec_push (aggr_vec_init "self")))
+// 12: lookup_stack2 (call (aggr_slice_fold (arg lookup_stack FUNC_LOOKUP_STACK_PUSH)))
+// call (aggr_vec_push (lookup_stack2 "arg"))
 #[rustfmt::skip]
 static FUNC_LOOKUP_STACK_MAKE: Value = cera!(
     (
-        {AGGR_VEC_PUSH}
-        {AGGR_VEC_INIT}
-        {AGGR_SLICE_FOLD}
+        aggr_vec_push
+        aggr_vec_init
+        aggr_slice_fold
         self
         {FUNC_LOOKUP_STACK_PUSH}
         arg
     )
     (
-        (call ([1] ([2] [4])))
-        (call ([3] ([7] [8] [5])))
-        (call ([1] ([9] [6])))
+        (builtin_import [1])
+        (builtin_import [2])
+        (builtin_import [3])
+        (call ([8] ([9] [4])))
+        (call ([10] ([7] [11] [5])))
+        (call ([8] ([12] [6])))
     )
 );
 
@@ -1356,20 +1372,22 @@ static FUNC_LOOKUP_STACK_MAKE: Value = cera!(
 // 0: self
 // 1: 0
 // 2: 1
-// 3: AGGR_VEC_PUSH
+// 3: aggr_vec_push
 // 4: arg
 // 5: lookup_stack (aggr_get (arg 0))
 // 6: elem (aggr_get (arg 1))
 // 7: ident (aggr_get (elem 0))
-// call (AGGR_VEC_PUSH (lookup_stack ident))
+// 8: aggr_vec_push (builtin_import aggr_vec_push)
+// call (aggr_vec_push (lookup_stack ident))
 #[rustfmt::skip]
 static FUNC_LOOKUP_STACK_PUSH: Value = cera!(
-    ([0] [1] {AGGR_VEC_PUSH})
+    ([0] [1] aggr_vec_push)
     (
         (aggr_get ([4] [1]))
         (aggr_get ([4] [2]))
         (aggr_get ([6] [1]))
-        (call ([3] ([5] [7])))
+        (builtin_import [3])
+        (call ([8] ([5] [7])))
     )
 );
 
@@ -1403,39 +1421,43 @@ static FUNC_EXPRESSION_MAP: Value = cera!(
 // 0: self
 // 1: 0
 // 2: 1
-// 3: TYPE_AGGR
+// 3: type_aggr
 // 4: closure
 // 5: call
-// 6: AGGR_MAP
+// 6: aggr_map
 // 7: FUNC_LOOKUP_STACK_FIND
 // 8: arg
 // 9: lookup_stack (aggr_get (arg 0))
 // 10: args (aggr_get (arg 1))
 // 11: args_type (type_of args)
-// 12: is_aggr (bytes_eq (args_type TYPE_AGGR))
-// 13: aggr_closure (identity (closure self lookup_stack))
+// 12: type_aggr (builtin_import type_aggr)
+// 13: aggr_map (builtin_import aggr_map)
+// 14: is_aggr (bytes_eq (args_type type_aggr))
+// 15: aggr_closure (identity (closure self lookup_stack))
 // if (is_aggr
-//  (call (AGGR_MAP (args aggr_closure)))
+//  (call (aggr_map (args aggr_closure)))
 //  (call (FUNC_LOOKUP_STACK_FIND (lookup_stack args))))
 #[rustfmt::skip]
 static FUNC_ARGS_MAP: Value = cera!(
     (
         [0]
         [1]
-        {TYPE_AGGR}
+        type_aggr
         closure
         call
-        {AGGR_MAP}
+        aggr_map
         {FUNC_LOOKUP_STACK_FIND} 
     )
     (
         (aggr_get ([8] [1]))
         (aggr_get ([8] [2]))
         (type_of [10])
-        (bytes_eq ([11] [3]))
+        (builtin_import [3])
+        (builtin_import [6])
+        (bytes_eq ([11] [12]))
         (identity ([4] [0] [9]))
-        (if ([12]
-            ([5] ([6] ([10] [13])))
+        (if ([14]
+            ([5] ([13] ([10] [15])))
             ([5] ([7] ([9] [10])))
         ))
     )

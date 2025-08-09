@@ -2285,340 +2285,15 @@
                 "\x01"
                 (
                     (
-                        (
-                            (
-                                ""
-                                "\x01"
-                                "aggr_vec_reserve"
-                            )
-                            (
-                                (
-                                    "aggr_get"
-                                    (
-                                        "\x04"
-                                        "\x01"
-                                    )
-                                )
-                                (
-                                    "aggr_get"
-                                    (
-                                        "\x04"
-                                        "\x02"
-                                    )
-                                )
-                                (
-                                    "aggr_get"
-                                    (
-                                        "\x05"
-                                        "\x01"
-                                    )
-                                )
-                                (
-                                    "add"
-                                    (
-                                        "\x07"
-                                        "\x02"
-                                    )
-                                )
-                                (
-                                    "builtin_import"
-                                    "\x03"
-                                )
-                                (
-                                    "call"
-                                    (
-                                        "\x09"
-                                        (
-                                            "\x05"
-                                            "\x08"
-                                        )
-                                    )
-                                )
-                                (
-                                    "aggr_get"
-                                    (
-                                        "\x0a"
-                                        "\x02"
-                                    )
-                                )
-                                (
-                                    "aggr_set"
-                                    (
-                                        "\x0b"
-                                        "\x07"
-                                        "\x06"
-                                    )
-                                )
-                                (
-                                    "identity"
-                                    (
-                                        "\x08"
-                                        "\x0c"
-                                    )
-                                )
-                            )
-                        )
-                        (
-                            ""
-                            (
-                            )
-                        )
-                        (
-                            (
-                                ""
-                                "\x01"
-                                "aggr_slice_is_empty"
-                                "identity"
-                                "call"
-                                "pipe"
-                                (
-                                    (
-                                        ""
-                                        "\x01"
-                                        "\x02"
-                                        "aggr_slice_get"
-                                    )
-                                    (
-                                        (
-                                            "aggr_get"
-                                            (
-                                                "\x05"
-                                                "\x01"
-                                            )
-                                        )
-                                        (
-                                            "aggr_get"
-                                            (
-                                                "\x05"
-                                                "\x02"
-                                            )
-                                        )
-                                        (
-                                            "aggr_get"
-                                            (
-                                                "\x05"
-                                                "\x03"
-                                            )
-                                        )
-                                        (
-                                            "aggr_set"
-                                            (
-                                                "\x05"
-                                                "\x01"
-                                                (
-                                                )
-                                            )
-                                        )
-                                        (
-                                            "aggr_set"
-                                            (
-                                                "\x09"
-                                                "\x02"
-                                                (
-                                                )
-                                            )
-                                        )
-                                        (
-                                            "builtin_import"
-                                            "\x04"
-                                        )
-                                        (
-                                            "call"
-                                            (
-                                                "\x0b"
-                                                (
-                                                    "\x06"
-                                                    "\x01"
-                                                )
-                                            )
-                                        )
-                                        (
-                                            "call"
-                                            (
-                                                "\x08"
-                                                (
-                                                    "\x07"
-                                                    "\x0c"
-                                                )
-                                            )
-                                        )
-                                        (
-                                            "aggr_set"
-                                            (
-                                                "\x0a"
-                                                "\x02"
-                                                "\x0d"
-                                            )
-                                        )
-                                        (
-                                            "aggr_get"
-                                            (
-                                                "\x06"
-                                                "\x01"
-                                            )
-                                        )
-                                        (
-                                            "add"
-                                            (
-                                                "\x0f"
-                                                "\x02"
-                                            )
-                                        )
-                                        (
-                                            "aggr_set"
-                                            (
-                                                "\x06"
-                                                "\x01"
-                                                "\x10"
-                                            )
-                                        )
-                                        (
-                                            "aggr_set"
-                                            (
-                                                "\x0e"
-                                                "\x01"
-                                                "\x11"
-                                            )
-                                        )
-                                    )
-                                )
-                            )
-                            (
-                                (
-                                    "aggr_get"
-                                    (
-                                        "\x08"
-                                        "\x01"
-                                    )
-                                )
-                                (
-                                    "aggr_get"
-                                    (
-                                        "\x08"
-                                        "\x02"
-                                    )
-                                )
-                                (
-                                    "builtin_import"
-                                    "\x03"
-                                )
-                                (
-                                    "builtin_import"
-                                    "\x06"
-                                )
-                                (
-                                    "call"
-                                    (
-                                        "\x0b"
-                                        "\x09"
-                                    )
-                                )
-                                (
-                                    "if"
-                                    (
-                                        "\x0d"
-                                        (
-                                            "\x04"
-                                            "\x0a"
-                                        )
-                                        (
-                                            "\x05"
-                                            (
-                                                "\x0c"
-                                                (
-                                                    (
-                                                        "\x05"
-                                                        (
-                                                            "\x07"
-                                                            "\x08"
-                                                        )
-                                                    )
-                                                    ""
-                                                )
-                                            )
-                                        )
-                                    )
-                                )
-                            )
-                        )
+                        "aggr_vec_push"
+                        "aggr_vec_init"
+                        "aggr_slice_fold"
                         "self"
                         (
                             (
                                 ""
                                 "\x01"
-                                (
-                                    (
-                                        ""
-                                        "\x01"
-                                        "aggr_vec_reserve"
-                                    )
-                                    (
-                                        (
-                                            "aggr_get"
-                                            (
-                                                "\x04"
-                                                "\x01"
-                                            )
-                                        )
-                                        (
-                                            "aggr_get"
-                                            (
-                                                "\x04"
-                                                "\x02"
-                                            )
-                                        )
-                                        (
-                                            "aggr_get"
-                                            (
-                                                "\x05"
-                                                "\x01"
-                                            )
-                                        )
-                                        (
-                                            "add"
-                                            (
-                                                "\x07"
-                                                "\x02"
-                                            )
-                                        )
-                                        (
-                                            "builtin_import"
-                                            "\x03"
-                                        )
-                                        (
-                                            "call"
-                                            (
-                                                "\x09"
-                                                (
-                                                    "\x05"
-                                                    "\x08"
-                                                )
-                                            )
-                                        )
-                                        (
-                                            "aggr_get"
-                                            (
-                                                "\x0a"
-                                                "\x02"
-                                            )
-                                        )
-                                        (
-                                            "aggr_set"
-                                            (
-                                                "\x0b"
-                                                "\x07"
-                                                "\x06"
-                                            )
-                                        )
-                                        (
-                                            "identity"
-                                            (
-                                                "\x08"
-                                                "\x0c"
-                                            )
-                                        )
-                                    )
-                                )
+                                "aggr_vec_push"
                             )
                             (
                                 (
@@ -2643,9 +2318,13 @@
                                     )
                                 )
                                 (
+                                    "builtin_import"
+                                    "\x03"
+                                )
+                                (
                                     "call"
                                     (
-                                        "\x03"
+                                        "\x08"
                                         (
                                             "\x05"
                                             "\x07"
@@ -2658,46 +2337,9 @@
                     )
                     (
                         (
-                            "call"
-                            (
-                                "\x01"
-                                (
-                                    "\x02"
-                                    "\x04"
-                                )
-                            )
+                            "builtin_import"
+                            "\x01"
                         )
-                        (
-                            "call"
-                            (
-                                "\x03"
-                                (
-                                    "\x07"
-                                    "\x08"
-                                    "\x05"
-                                )
-                            )
-                        )
-                        (
-                            "call"
-                            (
-                                "\x01"
-                                (
-                                    "\x09"
-                                    "\x06"
-                                )
-                            )
-                        )
-                    )
-                )
-                (
-                    (
-                        ""
-                        "aggr_slice_len"
-                        "aggr_slice_copy"
-                        "aggr_slice_buf"
-                    )
-                    (
                         (
                             "builtin_import"
                             "\x02"
@@ -2707,35 +2349,23 @@
                             "\x03"
                         )
                         (
-                            "builtin_import"
-                            "\x04"
-                        )
-                        (
                             "call"
                             (
-                                "\x06"
-                                "\x05"
-                            )
-                        )
-                        (
-                            "aggr_make"
-                            "\x09"
-                        )
-                        (
-                            "identity"
-                            (
-                                "\x01"
-                                "\x09"
-                                "\x0a"
-                            )
-                        )
-                        (
-                            "call"
-                            (
-                                "\x07"
+                                "\x08"
                                 (
-                                    "\x05"
+                                    "\x09"
+                                    "\x04"
+                                )
+                            )
+                        )
+                        (
+                            "call"
+                            (
+                                "\x0a"
+                                (
+                                    "\x07"
                                     "\x0b"
+                                    "\x05"
                                 )
                             )
                         )
@@ -2743,72 +2373,16 @@
                             "call"
                             (
                                 "\x08"
-                                "\x0c"
-                            )
-                        )
-                    )
-                )
-                (
-                    (
-                        ""
-                        "\x01"
-                        "aggr_slice_new"
-                        "aggr_slice_map"
-                        "aggr_slice_buf"
-                    )
-                    (
-                        (
-                            "aggr_get"
-                            (
-                                "\x06"
-                                "\x01"
-                            )
-                        )
-                        (
-                            "aggr_get"
-                            (
-                                "\x06"
-                                "\x02"
-                            )
-                        )
-                        (
-                            "builtin_import"
-                            "\x03"
-                        )
-                        (
-                            "builtin_import"
-                            "\x04"
-                        )
-                        (
-                            "builtin_import"
-                            "\x05"
-                        )
-                        (
-                            "call"
-                            (
-                                "\x09"
-                                "\x07"
-                            )
-                        )
-                        (
-                            "call"
-                            (
-                                "\x0a"
                                 (
                                     "\x0c"
-                                    "\x08"
+                                    "\x06"
                                 )
-                            )
-                        )
-                        (
-                            "call"
-                            (
-                                "\x0b"
-                                "\x0d"
                             )
                         )
                     )
                 )
+                "aggr_slice_to_aggr"
+                "aggr_map"
                 (
                     (
                         "\x01"
@@ -2823,189 +2397,8 @@
                         )
                     )
                 )
-                (
-                    (
-                        ""
-                        "\x01"
-                        "aggr_slice_is_empty"
-                        "identity"
-                        "call"
-                        "pipe"
-                        (
-                            (
-                                ""
-                                "\x01"
-                                "\x02"
-                                "aggr_slice_get"
-                            )
-                            (
-                                (
-                                    "aggr_get"
-                                    (
-                                        "\x05"
-                                        "\x01"
-                                    )
-                                )
-                                (
-                                    "aggr_get"
-                                    (
-                                        "\x05"
-                                        "\x02"
-                                    )
-                                )
-                                (
-                                    "aggr_get"
-                                    (
-                                        "\x05"
-                                        "\x03"
-                                    )
-                                )
-                                (
-                                    "aggr_set"
-                                    (
-                                        "\x05"
-                                        "\x01"
-                                        (
-                                        )
-                                    )
-                                )
-                                (
-                                    "aggr_set"
-                                    (
-                                        "\x09"
-                                        "\x02"
-                                        (
-                                        )
-                                    )
-                                )
-                                (
-                                    "builtin_import"
-                                    "\x04"
-                                )
-                                (
-                                    "call"
-                                    (
-                                        "\x0b"
-                                        (
-                                            "\x06"
-                                            "\x01"
-                                        )
-                                    )
-                                )
-                                (
-                                    "call"
-                                    (
-                                        "\x08"
-                                        (
-                                            "\x07"
-                                            "\x0c"
-                                        )
-                                    )
-                                )
-                                (
-                                    "aggr_set"
-                                    (
-                                        "\x0a"
-                                        "\x02"
-                                        "\x0d"
-                                    )
-                                )
-                                (
-                                    "aggr_get"
-                                    (
-                                        "\x06"
-                                        "\x01"
-                                    )
-                                )
-                                (
-                                    "add"
-                                    (
-                                        "\x0f"
-                                        "\x02"
-                                    )
-                                )
-                                (
-                                    "aggr_set"
-                                    (
-                                        "\x06"
-                                        "\x01"
-                                        "\x10"
-                                    )
-                                )
-                                (
-                                    "aggr_set"
-                                    (
-                                        "\x0e"
-                                        "\x01"
-                                        "\x11"
-                                    )
-                                )
-                            )
-                        )
-                    )
-                    (
-                        (
-                            "aggr_get"
-                            (
-                                "\x08"
-                                "\x01"
-                            )
-                        )
-                        (
-                            "aggr_get"
-                            (
-                                "\x08"
-                                "\x02"
-                            )
-                        )
-                        (
-                            "builtin_import"
-                            "\x03"
-                        )
-                        (
-                            "builtin_import"
-                            "\x06"
-                        )
-                        (
-                            "call"
-                            (
-                                "\x0b"
-                                "\x09"
-                            )
-                        )
-                        (
-                            "if"
-                            (
-                                "\x0d"
-                                (
-                                    "\x04"
-                                    "\x0a"
-                                )
-                                (
-                                    "\x05"
-                                    (
-                                        "\x0c"
-                                        (
-                                            (
-                                                "\x05"
-                                                (
-                                                    "\x07"
-                                                    "\x08"
-                                                )
-                                            )
-                                            ""
-                                        )
-                                    )
-                                )
-                            )
-                        )
-                    )
-                )
-                (
-                    ""
-                    (
-                    )
-                )
+                "aggr_slice_fold"
+                "aggr_vec_init"
                 (
                     (
                         ""
@@ -3018,70 +2411,10 @@
                                     (
                                         ""
                                         "\x01"
-                                        "aggr"
+                                        "type_aggr"
                                         "closure"
                                         "call"
-                                        (
-                                            (
-                                                ""
-                                                "\x01"
-                                                "aggr_slice_new"
-                                                "aggr_slice_map"
-                                                "aggr_slice_buf"
-                                            )
-                                            (
-                                                (
-                                                    "aggr_get"
-                                                    (
-                                                        "\x06"
-                                                        "\x01"
-                                                    )
-                                                )
-                                                (
-                                                    "aggr_get"
-                                                    (
-                                                        "\x06"
-                                                        "\x02"
-                                                    )
-                                                )
-                                                (
-                                                    "builtin_import"
-                                                    "\x03"
-                                                )
-                                                (
-                                                    "builtin_import"
-                                                    "\x04"
-                                                )
-                                                (
-                                                    "builtin_import"
-                                                    "\x05"
-                                                )
-                                                (
-                                                    "call"
-                                                    (
-                                                        "\x09"
-                                                        "\x07"
-                                                    )
-                                                )
-                                                (
-                                                    "call"
-                                                    (
-                                                        "\x0a"
-                                                        (
-                                                            "\x0c"
-                                                            "\x08"
-                                                        )
-                                                    )
-                                                )
-                                                (
-                                                    "call"
-                                                    (
-                                                        "\x0b"
-                                                        "\x0d"
-                                                    )
-                                                )
-                                            )
-                                        )
+                                        "aggr_map"
                                         (
                                             (
                                                 ""
@@ -3255,10 +2588,18 @@
                                             "\x0a"
                                         )
                                         (
+                                            "builtin_import"
+                                            "\x03"
+                                        )
+                                        (
+                                            "builtin_import"
+                                            "\x06"
+                                        )
+                                        (
                                             "bytes_eq"
                                             (
                                                 "\x0b"
-                                                "\x03"
+                                                "\x0c"
                                             )
                                         )
                                         (
@@ -3272,14 +2613,14 @@
                                         (
                                             "if"
                                             (
-                                                "\x0c"
+                                                "\x0e"
                                                 (
                                                     "\x05"
                                                     (
-                                                        "\x06"
+                                                        "\x0d"
                                                         (
                                                             "\x0a"
-                                                            "\x0d"
+                                                            "\x0f"
                                                         )
                                                     )
                                                 )
@@ -3346,79 +2687,7 @@
                                 )
                             )
                         )
-                        (
-                            (
-                                ""
-                                "\x01"
-                                "aggr_vec_reserve"
-                            )
-                            (
-                                (
-                                    "aggr_get"
-                                    (
-                                        "\x04"
-                                        "\x01"
-                                    )
-                                )
-                                (
-                                    "aggr_get"
-                                    (
-                                        "\x04"
-                                        "\x02"
-                                    )
-                                )
-                                (
-                                    "aggr_get"
-                                    (
-                                        "\x05"
-                                        "\x01"
-                                    )
-                                )
-                                (
-                                    "add"
-                                    (
-                                        "\x07"
-                                        "\x02"
-                                    )
-                                )
-                                (
-                                    "builtin_import"
-                                    "\x03"
-                                )
-                                (
-                                    "call"
-                                    (
-                                        "\x09"
-                                        (
-                                            "\x05"
-                                            "\x08"
-                                        )
-                                    )
-                                )
-                                (
-                                    "aggr_get"
-                                    (
-                                        "\x0a"
-                                        "\x02"
-                                    )
-                                )
-                                (
-                                    "aggr_set"
-                                    (
-                                        "\x0b"
-                                        "\x07"
-                                        "\x06"
-                                    )
-                                )
-                                (
-                                    "identity"
-                                    (
-                                        "\x08"
-                                        "\x0c"
-                                    )
-                                )
-                            )
-                        )
+                        "aggr_vec_push"
                     )
                     (
                         (
@@ -3474,9 +2743,13 @@
                             )
                         )
                         (
+                            "builtin_import"
+                            "\x04"
+                        )
+                        (
                             "call"
                             (
-                                "\x04"
+                                "\x0d"
                                 (
                                     "\x08"
                                     "\x0c"
@@ -3486,7 +2759,7 @@
                         (
                             "call"
                             (
-                                "\x04"
+                                "\x0d"
                                 (
                                     "\x09"
                                     "\x0a"
@@ -3495,51 +2768,14 @@
                         )
                         (
                             "identity"
-                            "\x08"
-                        )
-                        (
-                            "identity"
-                            "\x09"
-                        )
-                        (
-                            "identity"
                             (
-                                "\x0d"
                                 "\x0e"
+                                "\x0f"
                             )
                         )
                     )
                 )
-                (
-                    (
-                        ""
-                        "\x01"
-                    )
-                    (
-                        (
-                            "aggr_get"
-                            (
-                                "\x03"
-                                "\x01"
-                            )
-                        )
-                        (
-                            "aggr_get"
-                            (
-                                "\x03"
-                                "\x02"
-                            )
-                        )
-                        (
-                            "identity"
-                            (
-                                "\x01"
-                                "\x04"
-                                "\x05"
-                            )
-                        )
-                    )
-                )
+                "aggr_vec_borrow_slice"
             )
             (
                 (
@@ -3557,6 +2793,26 @@
                     )
                 )
                 (
+                    "builtin_import"
+                    "\x04"
+                )
+                (
+                    "builtin_import"
+                    "\x05"
+                )
+                (
+                    "builtin_import"
+                    "\x07"
+                )
+                (
+                    "builtin_import"
+                    "\x08"
+                )
+                (
+                    "builtin_import"
+                    "\x0a"
+                )
+                (
                     "call"
                     (
                         "\x03"
@@ -3566,16 +2822,16 @@
                 (
                     "call"
                     (
-                        "\x04"
+                        "\x0e"
                         "\x0c"
                     )
                 )
                 (
                     "call"
                     (
-                        "\x05"
+                        "\x0f"
                         (
-                            "\x0f"
+                            "\x14"
                             "\x06"
                         )
                     )
@@ -3583,12 +2839,12 @@
                 (
                     "call"
                     (
-                        "\x07"
+                        "\x10"
                         (
                             "\x0d"
                             (
-                                "\x08"
-                                "\x0e"
+                                "\x11"
+                                "\x13"
                             )
                             "\x09"
                         )
@@ -3597,29 +2853,29 @@
                 (
                     "aggr_get"
                     (
-                        "\x11"
+                        "\x16"
                         "\x01"
                     )
                 )
                 (
                     "call"
                     (
-                        "\x0a"
                         "\x12"
+                        "\x17"
                     )
                 )
                 (
                     "call"
                     (
-                        "\x04"
-                        "\x13"
+                        "\x0e"
+                        "\x18"
                     )
                 )
                 (
                     "identity"
                     (
-                        "\x10"
-                        "\x14"
+                        "\x15"
+                        "\x19"
                     )
                 )
             )
