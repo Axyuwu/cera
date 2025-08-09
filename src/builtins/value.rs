@@ -73,7 +73,6 @@ impl HasSliceStorage for Value {
     type Storage = Infallible;
 }
 impl HasSliceStorage for u8 {
-    //type Storage = Infallible;
     type Storage = U8SliceStorage;
 }
 
