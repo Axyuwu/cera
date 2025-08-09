@@ -3,7 +3,6 @@ use ahash::AHashMap;
 use super::FuncThunk;
 use super::Value;
 use crate::builtins::Cache;
-use crate::write::write_module_pretty;
 
 const fn trim_trailing_zeros(slice: &[u8]) -> &[u8] {
     if let Some((0, slice)) = slice.split_last() {
@@ -13,15 +12,6 @@ const fn trim_trailing_zeros(slice: &[u8]) -> &[u8] {
     }
 }
 
-macro_rules! cera {
-    ($($tt:tt)*) => {
-        cera_expr!(($($tt)*))
-    };
-}
-macro_rules! count {
-    () => (0usize);
-    ($x:tt $($xs:tt)*) => (1usize + count!($($xs)*))
-}
 macro_rules! cera_expr {
     ({$expr:expr}) => {
         $expr.static_copy()
@@ -58,6 +48,12 @@ macro_rules! cera_expr {
 pub struct BuiltinLookup(AHashMap<Box<[u8]>, Value>);
 
 impl BuiltinLookup {
+    pub fn get(&self, str: &[u8]) -> Value {
+        self.0
+            .get(str)
+            .unwrap_or_else(|| panic!("invalid builtin import: {}", Value::bytes_move(str)))
+            .clone()
+    }
     pub fn new(value: Value) -> Self {
         Self(
             value
@@ -78,49 +74,7 @@ pub struct BuiltinImport;
 impl BuiltinImport {
     pub(super) fn poll(self, value: Value, lookup: &BuiltinLookup) -> FuncThunk {
         FuncThunk::Done {
-            value: match &**value.as_bytes() {
-                b"builtin_eval_func" => BUILTIN_EVAL_FUNC.static_copy(),
-                b"aggr_map" => AGGR_MAP.static_copy(),
-                b"aggr_slice_get" => AGGR_SLICE_GET.static_copy(),
-                b"aggr_slice_try_get" => AGGR_SLICE_TRY_GET.static_copy(),
-                b"bool_then" => BOOL_THEN.static_copy(),
-                b"bool_then_some" => BOOL_THEN_SOME.static_copy(),
-                b"some_new" => SOME_NEW.static_copy(),
-                b"none" => NONE.static_copy(),
-                b"pipe" => PIPE.static_copy(),
-                b"compose" => COMPOSE.static_copy(),
-                b"bool_not" => BOOL_NOT.static_copy(),
-                b"aggr_slice_new" => AGGR_SLICE_NEW.static_copy(),
-                b"aggr_slice_buf" => AGGR_SLICE_BUF.static_copy(),
-                b"aggr_slice_try_set" => AGGR_SLICE_TRY_SET.static_copy(),
-                b"aggr_slice_set" => AGGR_SLICE_SET.static_copy(),
-                b"aggr_slice_len" => AGGR_SLICE_LEN.static_copy(),
-                b"aggr_slice_is_empty" => AGGR_SLICE_IS_EMPTY.static_copy(),
-                b"aggr_slice_map_fold" => AGGR_SLICE_MAP_FOLD.static_copy(),
-                b"aggr_slice_map" => AGGR_SLICE_MAP.static_copy(),
-                b"aggr_slice_fold" => AGGR_SLICE_FOLD.static_copy(),
-                b"aggr_slice_copy" => AGGR_SLICE_COPY.static_copy(),
-                b"aggr_slice_to_aggr" => AGGR_SLICE_TO_AGGR.static_copy(),
-                b"aggr_vec_borrow_slice" => AGGR_VEC_BORROW_SLICE.static_copy(),
-                b"aggr_vec_unborrow_slice" => AGGR_VEC_UNBORROW_SLICE.static_copy(),
-                b"aggr_vec_init" => AGGR_VEC_INIT.static_copy(),
-                b"aggr_vec_push" => AGGR_VEC_PUSH.static_copy(),
-                b"aggr_vec_reserve" => AGGR_VEC_RESERVE.static_copy(),
-                b"aggr_vec_pop" => AGGR_VEC_POP.static_copy(),
-                b"min" => MIN.static_copy(),
-                b"max" => MAX.static_copy(),
-                b"true" => TRUE.static_copy(),
-                b"false" => FALSE.static_copy(),
-                b"cmp_less" => CMP_LESS.static_copy(),
-                b"cmp_equal" => CMP_EQUAL.static_copy(),
-                b"cmp_greater" => CMP_GREATER.static_copy(),
-                b"type_aggr" => TYPE_AGGR.static_copy(),
-                b"type_bytes" => TYPE_BYTES.static_copy(),
-                b"func_desugar_basic" => FUNC_DESUGAR_BASIC.static_copy(),
-                b"func_desugar_basic_aggr" => FUNC_DESUGAR_BASIC_AGGR.static_copy(),
-                b"extensible_eval" => EXTENSIBLE_EVAL.static_copy(),
-                _ => panic!("invalid builtin_import argument: {value}"),
-            },
+            value: lookup.get(&**value.as_bytes()),
         }
     }
     pub fn from_ident(ident: &[u8]) -> Option<Self> {
@@ -131,6 +85,15 @@ impl BuiltinImport {
     }
 }
 
+pub static TRUE: Value = cera_expr!([1]);
+pub static FALSE: Value = cera_expr!([0]);
+pub static CMP_LESS: Value = cera_expr!([0]);
+pub static CMP_EQUAL: Value = cera_expr!([1]);
+pub static CMP_GREATER: Value = cera_expr!([2]);
+pub static TYPE_AGGR: Value = cera_expr!(aggr);
+pub static TYPE_BYTES: Value = cera_expr!(bytes);
+
+/*
 // (func world) -> func_res
 //
 // 0: self
@@ -403,7 +366,7 @@ static AGGR_SLICE_TRY_SET: Value = cera!(
         (aggr_len [14])
         (cmp ([15] [16]))
         (eq ([1] [17]))
-        (if ([18] 
+        (if ([18]
             ([6] ([14] [15] [11]))
             ([7] [14])
         ))
@@ -843,14 +806,6 @@ static AGGR_SLICE_TO_AGGR: Value = cera!(
         (call ([8] [12]))
     )
 );
-
-pub static TRUE: Value = cera_expr!([1]);
-pub static FALSE: Value = cera_expr!([0]);
-pub static CMP_LESS: Value = cera_expr!([0]);
-pub static CMP_EQUAL: Value = cera_expr!([1]);
-pub static CMP_GREATER: Value = cera_expr!([2]);
-pub static TYPE_AGGR: Value = cera_expr!(aggr);
-pub static TYPE_BYTES: Value = cera_expr!(bytes);
 
 // bool -> !bool
 //
@@ -1466,7 +1421,7 @@ static FUNC_ARGS_MAP: Value = cera!(
         closure
         call
         aggr_map
-        {FUNC_LOOKUP_STACK_FIND} 
+        {FUNC_LOOKUP_STACK_FIND}
     )
     (
         (aggr_get ([8] [1]))
@@ -1728,3 +1683,4 @@ static MACRO_LOOKUP_STEP: Value = cera_desugared!(
         (return (identity (ident found)))
     )
 );
+*/

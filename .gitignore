@@ -4,3 +4,4 @@ result
 flamegraph.svg
 perf.data
 *.old
+bootstrap.cera

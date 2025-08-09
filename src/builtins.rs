@@ -39,7 +39,7 @@ pub fn eval_builtin(atom: Atom, lookup: &Arc<BuiltinLookup>) -> Value {
     let arg = Value::aggregate_move([atom, world_handle]);
     FuncThunk::Step {
         func: BuiltinFunc::Call,
-        value: Value::aggregate_move([builtin_values::BUILTIN_EVAL_FUNC.static_copy(), arg]),
+        value: Value::aggregate_move([lookup.get(b"builtin_eval_func"), arg]),
     }
     .eval::<false>(&mut world, lookup)
 }
