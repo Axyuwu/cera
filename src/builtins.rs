@@ -3,6 +3,7 @@ pub mod builtin_values;
 pub mod value;
 mod world;
 
+use crate::builtins::builtin_values::BuiltinLookup;
 use crate::utils::sync::cache_arc::CacheArc as Arc;
 use crate::utils::sync::cache_lock::CacheLock;
 use std::fmt::Debug;
@@ -32,7 +33,7 @@ pub struct CacheInner {
     func: Arc<LetProcessed>,
 }
 
-pub fn eval_builtin(atom: Atom) -> Value {
+pub fn eval_builtin(atom: Atom, lookup: &Arc<BuiltinLookup>) -> Value {
     let (mut world, world_handle) = World::new();
     let atom = atom_to_val(atom);
     let arg = Value::aggregate_move([atom, world_handle]);
@@ -40,7 +41,19 @@ pub fn eval_builtin(atom: Atom) -> Value {
         func: BuiltinFunc::Call,
         value: Value::aggregate_move([builtin_values::BUILTIN_EVAL_FUNC.static_copy(), arg]),
     }
-    .eval::<false>(&mut world)
+    .eval::<false>(&mut world, lookup)
+}
+
+pub fn atom_to_val_raw(atom: Atom) -> Value {
+    match atom {
+        Atom::Aggr(atoms) => Value::aggregate_move(
+            <Box<[_]> as IntoIterator>::into_iter(atoms)
+                .map(atom_to_val_raw)
+                .collect::<Arc<_, _>>(),
+        ),
+        Atom::Identifier(s) => Value::bytes_move(s.as_bytes()),
+        Atom::Bytes(s) => Value::bytes_move(&*s),
+    }
 }
 
 fn atom_to_val(atom: Atom) -> Value {
@@ -73,10 +86,16 @@ enum FuncThunk {
 }
 
 impl FuncThunk {
-    fn eval<const IS_CONST_FOLD: bool>(mut self, world: &mut impl AsWorld) -> Value {
+    fn eval<const IS_CONST_FOLD: bool>(
+        mut self,
+        world: &mut impl AsWorld,
+        lookup: &Arc<BuiltinLookup>,
+    ) -> Value {
         loop {
             match self {
-                FuncThunk::Step { func, value } => self = func.poll::<IS_CONST_FOLD>(value, world),
+                FuncThunk::Step { func, value } => {
+                    self = func.poll::<IS_CONST_FOLD>(value, world, lookup)
+                }
                 FuncThunk::Done { value } => break value,
             }
         }
@@ -102,11 +121,16 @@ enum BuiltinFunc {
 
 impl BuiltinFunc {
     #[inline]
-    fn poll<const IS_CONST_FOLD: bool>(self, value: Value, world: &mut impl AsWorld) -> FuncThunk {
+    fn poll<const IS_CONST_FOLD: bool>(
+        self,
+        value: Value,
+        world: &mut impl AsWorld,
+        lookup: &Arc<BuiltinLookup>,
+    ) -> FuncThunk {
         use FuncThunk::*;
         match self {
             Self::BuiltinEval => Self::poll_builtin_eval(value),
-            Self::Call => Self::poll_call::<IS_CONST_FOLD>(value, world),
+            Self::Call => Self::poll_call::<IS_CONST_FOLD>(value, world, lookup),
             Self::If => Self::poll_if(value),
             Self::BytesEq => Self::poll_bytes_eq(value),
             Self::Identity => Done { value },
@@ -116,8 +140,8 @@ impl BuiltinFunc {
             Self::AggrMake => Self::poll_aggr_make(value),
             Self::TypeOf => Self::poll_typeof(value),
             Self::Arithmetic(arithmetic) => arithmetic.poll(value),
-            Self::WorldIo(world_io) => world_io.poll(value, world),
-            Self::BuiltinImport(builtin_import) => builtin_import.poll(value),
+            Self::WorldIo(world_io) => world_io.poll(value, world, lookup),
+            Self::BuiltinImport(builtin_import) => builtin_import.poll(value, lookup),
         }
     }
     fn poll_builtin_eval(value: Value) -> FuncThunk {
@@ -127,19 +151,28 @@ impl BuiltinFunc {
             value,
         }
     }
-    fn poll_call<const IS_CONST_FOLD: bool>(value: Value, world: &mut impl AsWorld) -> FuncThunk {
+    fn poll_call<const IS_CONST_FOLD: bool>(
+        value: Value,
+        world: &mut impl AsWorld,
+        lookup: &Arc<BuiltinLookup>,
+    ) -> FuncThunk {
         let [func, arg] = get_args(value);
         let func = func.into_aggregate();
         match func.len() {
             2 => {
                 // Function
-                Let::call::<IS_CONST_FOLD>(Value::Aggregate(func), arg, world)
+                Let::call::<IS_CONST_FOLD>(Value::Aggregate(func), arg, world, lookup)
             }
             3 => {
                 // Closure
                 let [magic, func, captured] = func.into_array();
                 debug_assert!(&**magic.as_bytes() == b"closure");
-                Let::call::<IS_CONST_FOLD>(func, Value::aggregate_move([captured, arg]), world)
+                Let::call::<IS_CONST_FOLD>(
+                    func,
+                    Value::aggregate_move([captured, arg]),
+                    world,
+                    lookup,
+                )
             }
             _ => panic!("{}", Value::Aggregate(func)),
         }
@@ -307,7 +340,7 @@ struct LetProcessed {
 }
 
 impl LetProcessed {
-    fn process_func<const IS_CONST_FOLD: bool>(func: &Value) -> Self {
+    fn process_func<const IS_CONST_FOLD: bool>(func: &Value, lookup: &Arc<BuiltinLookup>) -> Self {
         let [constants, expressions] = get_args(func.clone()).map(Value::into_aggregate);
         assert!(!expressions.is_empty());
 
@@ -355,7 +388,7 @@ impl LetProcessed {
             .for_each(|step| args_compute_moves(&mut step.args, &mut live_status));
 
         if !IS_CONST_FOLD {
-            Self::constant_fold(&mut constants, &mut instructions);
+            Self::constant_fold(&mut constants, &mut instructions, lookup);
             Self::trim_dead_code(&mut constants, &mut instructions);
         }
 
@@ -366,7 +399,11 @@ impl LetProcessed {
             constants,
         }
     }
-    fn constant_fold(constants: &mut Vec<Value>, instructions: &mut Vec<LetStep>) {
+    fn constant_fold(
+        constants: &mut Vec<Value>,
+        instructions: &mut Vec<LetStep>,
+        lookup: &Arc<BuiltinLookup>,
+    ) {
         assert!(!instructions.is_empty());
 
         let mut values: Vec<_> = constants
@@ -387,7 +424,7 @@ impl LetProcessed {
                 func: *func,
                 value: args,
             }
-            .eval::<true>(&mut PureWorld);
+            .eval::<true>(&mut PureWorld, lookup);
             let idx = i + instr_start;
             values[idx] = Some(val);
         });
@@ -489,13 +526,15 @@ impl Let {
         func: Value,
         arg: Value,
         world: &mut impl AsWorld,
+        lookup: &Arc<BuiltinLookup>,
     ) -> FuncThunk {
-        Let::init::<IS_CONST_FOLD>(func).poll::<IS_CONST_FOLD>(arg, world)
+        Let::init::<IS_CONST_FOLD>(func, lookup).poll::<IS_CONST_FOLD>(arg, world, lookup)
     }
     fn poll<const IS_CONST_FOLD: bool>(
         mut self,
         mut value: Value,
         world: &mut impl AsWorld,
+        lookup: &Arc<BuiltinLookup>,
     ) -> FuncThunk {
         loop {
             let Let {
@@ -516,19 +555,19 @@ impl Let {
             if *idx == state.len() {
                 break FuncThunk::Step { func, value: res };
             } else {
-                value = FuncThunk::Step { func, value: res }.eval::<IS_CONST_FOLD>(world);
+                value = FuncThunk::Step { func, value: res }.eval::<IS_CONST_FOLD>(world, lookup);
             }
         }
     }
-    fn init<const IS_CONST_FOLD: bool>(func: Value) -> Self {
+    fn init<const IS_CONST_FOLD: bool>(func: Value, lookup: &Arc<BuiltinLookup>) -> Self {
         let func = if !IS_CONST_FOLD {
             let res = func.cache().generate(|| CacheInner {
-                func: Arc::new(LetProcessed::process_func::<IS_CONST_FOLD>(&func)),
+                func: Arc::new(LetProcessed::process_func::<IS_CONST_FOLD>(&func, lookup)),
             });
             res.func.clone()
         } else {
             match func.cache().generate_nonblocking(|| CacheInner {
-                func: Arc::new(LetProcessed::process_func::<IS_CONST_FOLD>(&func)),
+                func: Arc::new(LetProcessed::process_func::<IS_CONST_FOLD>(&func, lookup)),
             }) {
                 Ok(cache) => cache.func.clone(),
                 Err(func) => func().func,

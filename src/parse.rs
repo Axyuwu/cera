@@ -62,7 +62,7 @@ impl Atom {
                     rem = rem2;
                 }
             };
-            str = rem
+            str = rem;
         }
     }
 }

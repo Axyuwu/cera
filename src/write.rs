@@ -1,14 +1,18 @@
 use crate::builtins::Value;
 
-pub fn write_value(value: &Value) -> String {
+pub fn write_module(value: &Value) -> String {
     let mut res = Default::default();
-    write_value_in(value, &mut res);
+    value.as_aggregate().iter().for_each(|value| {
+        write_module_in(value, &mut res);
+    });
     return res;
 }
 
-pub fn write_value_pretty(value: &Value) -> String {
+pub fn write_module_pretty(value: &Value) -> String {
     let mut res = Default::default();
-    write_value_pretty_in(value, &mut res, 0);
+    value.as_aggregate().iter().for_each(|value| {
+        write_module_pretty_in(value, &mut res, 0);
+    });
     return res;
 }
 
@@ -23,7 +27,7 @@ pub fn as_hex(byte: u8) -> [char; 2] {
     return [byte / 0x10, byte % 0x10].map(hexdigit);
 }
 
-fn write_value_in(value: &Value, sink: &mut String) {
+fn write_module_in(value: &Value, sink: &mut String) {
     match value {
         Value::Bytes(eval_slice) => {
             sink.push('"');
@@ -44,7 +48,7 @@ fn write_value_in(value: &Value, sink: &mut String) {
                 if i != 0 {
                     sink.push(' ')
                 }
-                write_value_in(e, sink);
+                write_module_in(e, sink);
             });
             sink.push(')');
         }
@@ -55,7 +59,7 @@ fn write_padding_in(padding: u64, sink: &mut String) {
     (0..padding).for_each(|_| sink.push_str("    "));
 }
 
-fn write_value_pretty_in(value: &Value, sink: &mut String, padding: u64) {
+fn write_module_pretty_in(value: &Value, sink: &mut String, padding: u64) {
     match value {
         Value::Bytes(eval_slice) => {
             write_padding_in(padding, sink);
@@ -75,7 +79,7 @@ fn write_value_pretty_in(value: &Value, sink: &mut String, padding: u64) {
             write_padding_in(padding, sink);
             sink.push_str("(\n");
             eval_slice.iter().for_each(|e| {
-                write_value_pretty_in(e, sink, padding + 1);
+                write_module_pretty_in(e, sink, padding + 1);
             });
             write_padding_in(padding, sink);
             sink.push_str(")\n");

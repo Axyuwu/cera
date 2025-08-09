@@ -1,6 +1,9 @@
+use ahash::AHashMap;
+
 use super::FuncThunk;
 use super::Value;
 use crate::builtins::Cache;
+use crate::write::write_module_pretty;
 
 const fn trim_trailing_zeros(slice: &[u8]) -> &[u8] {
     if let Some((0, slice)) = slice.split_last() {
@@ -52,11 +55,28 @@ macro_rules! cera_expr {
     }
 }
 
+pub struct BuiltinLookup(AHashMap<Box<[u8]>, Value>);
+
+impl BuiltinLookup {
+    pub fn new(value: Value) -> Self {
+        Self(
+            value
+                .into_aggregate()
+                .iter()
+                .map(|val| {
+                    let [key, val] = val.clone().into_aggregate().into_array();
+                    ((&**key.as_bytes()).into(), val)
+                })
+                .collect(),
+        )
+    }
+}
+
 #[derive(Debug, Clone, Copy)]
 pub struct BuiltinImport;
 
 impl BuiltinImport {
-    pub(super) fn poll(self, value: Value) -> FuncThunk {
+    pub(super) fn poll(self, value: Value, lookup: &BuiltinLookup) -> FuncThunk {
         FuncThunk::Done {
             value: match &**value.as_bytes() {
                 b"builtin_eval_func" => BUILTIN_EVAL_FUNC.static_copy(),

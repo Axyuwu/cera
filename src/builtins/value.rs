@@ -128,6 +128,9 @@ impl<T: HasSliceStorage> EvalSlice<T> {
         T: Clone,
     {
         let s = &*self;
+        if s.len() != SIZE {
+            eprintln!("{}", s.len())
+        };
         assert!(s.len() == SIZE);
         match self {
             Self::Arc(inner) => Arc::unwrap_or_clone(inner.try_into().unwrap()),

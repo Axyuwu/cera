@@ -1,12 +1,13 @@
 mod resources;
 
 use std::cell::Cell;
-use std::sync::Arc;
 use std::time::Duration;
 
 use resources::{Io, Thread};
 
+use crate::builtins::builtin_values::BuiltinLookup;
 use crate::builtins::get_u128;
+use crate::utils::sync::cache_arc::CacheArc as Arc;
 use crate::utils::sync::sync_map::{SyncMap, SyncMapKey};
 
 use super::get_usize;
@@ -312,7 +313,12 @@ impl WorldIo {
             Self::HintSpinLoop => "hint_spin_loop",
         }
     }
-    pub fn poll(self, value: Value, world: &mut impl AsWorld) -> FuncThunk {
+    pub fn poll(
+        self,
+        value: Value,
+        world: &mut impl AsWorld,
+        lookup: &Arc<BuiltinLookup>,
+    ) -> FuncThunk {
         let world = world.as_world();
         FuncThunk::Done {
             value: match self {
@@ -393,13 +399,15 @@ impl WorldIo {
                 }),
                 WorldIo::ThreadSleep => todo!(),
                 WorldIo::ThreadSpawn => world_map(world, value, |value| {
+                    let lookup = lookup.clone();
                     world
                         .new_thread(|mut world| {
+                            let lookup = lookup;
                             FuncThunk::Step {
                                 func: BuiltinFunc::BuiltinEval,
                                 value,
                             }
-                            .eval::<false>(&mut world)
+                            .eval::<false>(&mut world, &lookup)
                         })
                         .into()
                 }),
