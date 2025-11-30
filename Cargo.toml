@@ -8,6 +8,5 @@ inherits = "release"
 debug = true
 
 [dependencies]
-ahash = "0.8.12"
-parking_lot = "0.12.3"
-parking_lot_core = "0.9.10"
+nom = "8.0.0"
+
