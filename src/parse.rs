@@ -2,10 +2,10 @@ use std::array;
 
 use nom::{
     branch::alt,
-    bytes::complete::{escaped, escaped_transform, tag},
+    bytes::complete::tag,
     character::complete::{alphanumeric1, char, multispace0, none_of, satisfy},
-    combinator::{not, opt, recognize, value},
-    multi::{fold_many0, many, many0, many1},
+    combinator::{opt, recognize, value},
+    multi::{fold_many0, many0, many1},
     sequence::{delimited, preceded, terminated},
     AsBytes, AsChar, IResult, Parser,
 };
