@@ -1,11 +1,13 @@
+use std::array;
+
 use nom::{
     branch::alt,
-    bytes::complete::{escaped, tag},
+    bytes::complete::{escaped, escaped_transform, tag},
     character::complete::{alphanumeric1, char, multispace0, none_of, satisfy},
-    combinator::{not, opt, recognize},
+    combinator::{not, opt, recognize, value},
     multi::{fold_many0, many, many0, many1},
     sequence::{delimited, preceded, terminated},
-    IResult, Parser,
+    AsBytes, AsChar, IResult, Parser,
 };
 
 #[derive(Debug)]
@@ -31,7 +33,11 @@ fn parse_atom_many_sep(s: &str) -> IResult<&str, Atom> {
 }
 
 fn parse_atom(s: &str) -> IResult<&str, Atom> {
-    terminated(alt((parse_atom_group, parse_atom_ident)), multispace0).parse(s)
+    terminated(
+        alt((parse_atom_group, parse_atom_ident, parse_atom_string)),
+        multispace0,
+    )
+    .parse(s)
 }
 
 fn parse_atom_group(s: &str) -> IResult<&str, Atom> {
@@ -56,14 +62,62 @@ fn parse_atom_list(s: &str) -> IResult<&str, Atom> {
         .parse(s)
 }
 
-/*
+struct CharStep {
+    buf: [u8; 4],
+    len: usize,
+}
+impl<const LEN: usize> From<[u8; LEN]> for CharStep {
+    fn from(value: [u8; LEN]) -> Self {
+        value.as_bytes().into()
+    }
+}
+impl<const LEN: usize> From<&[u8; LEN]> for CharStep {
+    fn from(value: &[u8; LEN]) -> Self {
+        value.as_bytes().into()
+    }
+}
+impl From<&[u8]> for CharStep {
+    fn from(value: &[u8]) -> Self {
+        assert!(value.len() <= 4);
+        Self {
+            buf: array::from_fn(|i| value.get(i).copied().unwrap_or(0)),
+            len: value.len(),
+        }
+    }
+}
+
 fn parse_atom_string(s: &str) -> IResult<&str, Atom> {
-    //let hex_escape = preceeded(char('x'), recognize().map(u8::fro))
-    //let parse_escape = preceded(char('\\'), ());
-    let parse_char = alt((,)); //parse_escape));
-    let parse_inner = many0(parse_char);
+    let hex_digit = || satisfy(<char as AsChar>::is_hex_digit);
+    let hex_escape = preceded(
+        char('x'),
+        recognize((hex_digit(), hex_digit()))
+            .map_res(|s| u8::from_str_radix(s, 16).map(|e| [e].into())),
+    );
+    let ascii_escape = alt((
+        value(b"\"", char('\"')),
+        value(b"\\", char('\\')),
+        value(b"\0", char('0')),
+        value(b"\n", char('n')),
+        value(b"\r", char('r')),
+        value(b"\t", char('t')),
+    ))
+    .map(Into::into);
+    let parse_escape = preceded(char('\\'), alt((ascii_escape, hex_escape)));
+    let parse_char = none_of("\"\\").map(|c| {
+        let mut buf = CharStep {
+            buf: [0; _],
+            len: 0,
+        };
+        c.encode_utf8(&mut buf.buf);
+        buf.len = c.len_utf8();
+        buf
+    });
+    let parse_one = alt((parse_char, parse_escape));
+    let parse_inner = fold_many0(parse_one, Vec::new, |mut v, e| {
+        v.extend(&e.buf[..e.len]);
+        v
+    });
     delimited(char('\"'), parse_inner, char('\"'))
         .map(|s| Atom::String(s.into()))
         .parse(s)
 }
-*/
