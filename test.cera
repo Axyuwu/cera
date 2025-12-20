@@ -1,2 +1,12 @@
 test; test;
 test test
+(
+"this is a string literal\n\
+"
+groupa
+)
+{
+(})
+groupb
+}
+[({}); groupc]

@@ -8,5 +8,6 @@ inherits = "release"
 debug = true
 
 [dependencies]
+derive_more = { version = "2.1.0", features = ["from"] }
 nom = "8.0.0"
 
