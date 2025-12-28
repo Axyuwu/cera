@@ -1,11 +1,5 @@
 use nom::{
-    branch::alt,
-    bytes::complete::tag,
-    character::complete::{alphanumeric1, char, multispace0},
-    combinator::{cut, opt, recognize},
-    multi::{many0, many1},
-    sequence::{delimited, preceded, terminated},
-    IResult, Parser,
+    IResult, Parser, branch::alt, bytes::complete::tag, character::complete::{alphanumeric1, char, multispace0, one_of}, combinator::{cut, opt, recognize}, multi::{many0, many1}, sequence::{delimited, terminated}
 };
 
 use crate::parse::string::parse_string;
@@ -15,6 +9,7 @@ pub enum Atom {
     Group(Box<[Atom]>),
     String(Box<[u8]>),
     Ident(Box<str>),
+    Operator(Box<str>),
 }
 
 pub(super) fn parse_atom_many_sep(s: &str) -> IResult<&str, Atom> {
