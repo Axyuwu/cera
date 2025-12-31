@@ -1,2 +1,2 @@
 mod bridge;
-mod val;
+pub mod value;
