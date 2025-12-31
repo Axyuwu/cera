@@ -1,33 +1,41 @@
-use std::{mem, ptr::NonNull};
+use std::{fmt::Debug, mem, ptr::NonNull};
 
 pub use val_complex::ValComplex;
 
-mod owning {
-    use std::{mem::MaybeUninit, ops::DerefMut};
+use crate::interp::value::static_bool::{StaticBool, True};
+
+pub mod owning {
+    use std::mem::{self, MaybeUninit};
 
     /// Safety:
     /// This trait should be implemented respecting its specification, otherwise UB may occur
-    pub unsafe trait Owning: DerefMut {
-        fn move_out<F: FnOnce(*mut Self::Target)>(self, cb: F);
+    pub unsafe trait Owning<T: ?Sized>: AsRef<T> + AsMut<T> {
+        fn move_out<F: FnOnce(*mut T)>(self, cb: F);
     }
 
-    unsafe impl<T> Owning for Box<T> {
-        fn move_out<F: FnOnce(*mut Self::Target)>(self, cb: F) {
+    unsafe impl<const SIZE: usize, T> Owning<[T]> for [T; SIZE] {
+        fn move_out<F: FnOnce(*mut [T])>(mut self, cb: F) {
+            cb(&raw mut self);
+            mem::forget(self);
+        }
+    }
+    unsafe impl<T> Owning<T> for Box<T> {
+        fn move_out<F: FnOnce(*mut T)>(self, cb: F) {
             let ptr = Box::into_raw(self);
             cb(ptr);
             unsafe { drop(Box::from_raw(ptr.cast::<*mut MaybeUninit<T>>())) };
         }
     }
-    unsafe impl<T> Owning for Box<[T]> {
-        fn move_out<F: FnOnce(*mut Self::Target)>(self, cb: F) {
+    unsafe impl<T> Owning<[T]> for Box<[T]> {
+        fn move_out<F: FnOnce(*mut [T])>(self, cb: F) {
             let ptr = Box::into_raw(self);
             cb(ptr);
             unsafe { drop(Box::from_raw(ptr.cast::<*mut [MaybeUninit<T>]>())) };
         }
     }
 
-    unsafe impl<T> Owning for Vec<T> {
-        fn move_out<F: FnOnce(*mut Self::Target)>(mut self, cb: F) {
+    unsafe impl<T> Owning<[T]> for Vec<T> {
+        fn move_out<F: FnOnce(*mut [T])>(mut self, cb: F) {
             let ptr = &raw mut *self;
             cb(ptr);
             unsafe { drop(std::mem::transmute::<_, Vec<MaybeUninit<T>>>(self)) };
@@ -35,16 +43,13 @@ mod owning {
     }
 }
 
-pub struct StaticBool<const VAL: bool> {}
-pub trait True {}
-trait False {}
-impl True for StaticBool<true> {}
-impl False for StaticBool<false> {}
-
-/// A general value inside cera
-/// Dropping this type runs destructors
-#[repr(transparent)]
-pub struct Val(*mut ());
+pub mod static_bool {
+    pub struct StaticBool<const VAL: bool> {}
+    pub trait True {}
+    trait False {}
+    impl True for StaticBool<true> {}
+    impl False for StaticBool<false> {}
+}
 
 #[repr(usize)]
 #[derive(PartialEq, Eq, Debug)]
@@ -53,10 +58,46 @@ enum ValDiscrim {
     Primitive = 1,
 }
 
+/// A general value inside cera
+/// Dropping this type runs destructors
+#[repr(transparent)]
+pub struct Val(*mut ());
+
+impl Debug for Val {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        if let Some(c) = self.complex() {
+            c.fmt(f)
+        } else if let Some(n) = self.usize() {
+            n.fmt(f)
+        } else {
+            unreachable!()
+        }
+    }
+}
+
 impl Drop for Val {
     fn drop(&mut self) {
         let other = Self(self.0);
         drop(other.into_complex());
+    }
+}
+
+impl PartialEq for Val {
+    fn eq(&self, other: &Self) -> bool {
+        self.0.addr() == other.0.addr()
+    }
+}
+impl Eq for Val {}
+
+impl Clone for Val {
+    fn clone(&self) -> Self {
+        if let Some(c) = self.complex() {
+            Self::new_complex(c.clone())
+        } else if let Some(n) = self.usize() {
+            Self::new_usize(n)
+        } else {
+            unreachable!()
+        }
     }
 }
 
@@ -126,9 +167,8 @@ impl Val {
     where
         StaticBool<{ ValDiscrim::Complex as usize == 0 }>: True,
     {
-        let res = Self(complex.data.as_ptr());
+        let res = Self(complex.into_raw().as_ptr());
         debug_assert!(res.extract_discriminant() == ValDiscrim::Complex);
-        mem::forget(complex);
         res
     }
     pub fn new_usize(value: usize) -> Self {
@@ -145,7 +185,10 @@ mod val_complex {
     use std::{
         alloc::{alloc, dealloc, Layout},
         any::TypeId,
+        fmt::Debug,
+        mem,
         ptr::NonNull,
+        slice::{self},
         sync::atomic::{fence, AtomicUsize, Ordering},
     };
 
@@ -159,8 +202,7 @@ mod val_complex {
         Any {
             count: AtomicUsize,
             type_id: TypeId,
-            size: usize,
-            align: usize,
+            layout: Layout,
             drop: unsafe fn(*mut ()),
         },
     }
@@ -175,8 +217,7 @@ mod val_complex {
             Self::Any {
                 count: AtomicUsize::new(1),
                 type_id: TypeId::of::<T>(),
-                size: size_of::<T>(),
-                align: align_of::<T>(),
+                layout: Layout::new::<T>(),
                 drop: drop_in_place::<T>,
             }
         }
@@ -196,6 +237,36 @@ mod val_complex {
     #[repr(C)]
     pub struct ValComplex {
         pub(super) data: NonNull<()>,
+    }
+
+    impl Clone for ValComplex {
+        fn clone(&self) -> Self {
+            const MAX_REFCOUNT: usize = isize::MAX as usize;
+
+            let count = match self.extract_tag() {
+                ValComplexTag::Compound { count, .. } => count,
+                ValComplexTag::Any { count, .. } => count,
+            };
+            // Only relaxed ordering is required, as the current thread must own at least one
+            // count, and thus free or transfer that count while still owning it
+            // Those operations would be fully ordered with this add, and so the observable owning
+            // count of this thread will stay at least 1 until the thread drops its final value,
+            // ordering after everything in this thread
+            let prev = count.fetch_add(1, Ordering::Relaxed);
+            // From the atomic ordering this is *technically* unsound as there exists a window
+            // where any given thread may own a copy over this maximum, however, on the order of
+            // `usize::MAX / 2` threads would be required to exist to overflow
+            if prev > MAX_REFCOUNT {
+                // Same reasoning as the [`fetch_add`]
+                count.fetch_sub(1, Ordering::Relaxed);
+                panic!(
+                    "Created more than {} copies of the same arc, someone's leaking references",
+                    usize::MAX / 2
+                );
+            }
+            // We can now safely create a bitwise copy as we have incremented the reference count
+            Self { data: self.data }
+        }
     }
 
     impl Drop for ValComplex {
@@ -218,8 +289,7 @@ mod val_complex {
                 ValComplexTag::Any {
                     count,
                     drop,
-                    size,
-                    align,
+                    layout: data_layout,
                     ..
                 } => {
                     if count.fetch_sub(1, Ordering::Release) != 1 {
@@ -232,9 +302,8 @@ mod val_complex {
 
                     // SAFETY: These values were obtained from the approprimate methods when
                     // instantiating the dynamic type
-                    let data_layout = Layout::from_size_align(*size, *align).unwrap();
                     let tag_layout = Layout::new::<ValComplexTag>();
-                    let (total_layout, data_offset) = tag_layout.extend(data_layout).unwrap();
+                    let (total_layout, data_offset) = tag_layout.extend(*data_layout).unwrap();
                     let total_layout = total_layout.pad_to_align();
                     // SAFETY: This is the same layout as the initial allocation
                     unsafe {
@@ -244,6 +313,30 @@ mod val_complex {
                         );
                     }
                 }
+            }
+        }
+    }
+
+    impl PartialEq for ValComplex {
+        fn eq(&self, other: &Self) -> bool {
+            self.data.addr() == other.data.addr()
+        }
+    }
+    impl Eq for ValComplex {}
+
+    impl Debug for ValComplex {
+        fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+            match self.extract_tag() {
+                ValComplexTag::Compound { count, .. } => f
+                    .debug_struct("Compound")
+                    .field("count", count)
+                    .field("data", &self.get_compound().unwrap())
+                    .finish(),
+                ValComplexTag::Any { count, type_id, .. } => f
+                    .debug_struct("Any")
+                    .field("type_id", type_id)
+                    .field("count", count)
+                    .finish_non_exhaustive(),
             }
         }
     }
@@ -288,9 +381,12 @@ mod val_complex {
 
             res.cast()
         }
-        pub fn new_compound<T: Owning<Target = [Val]>>(compound: T) -> Self {
-            let res: NonNull<Val> =
-                Self::new_uninit_val(ValComplexTag::new_compound(&compound), &compound).cast();
+        pub fn new_compound<T: Owning<[Val]>>(compound: T) -> Self {
+            let res: NonNull<Val> = Self::new_uninit_val(
+                ValComplexTag::new_compound(compound.as_ref()),
+                compound.as_ref(),
+            )
+            .cast();
 
             compound.move_out(|ptr| {
                 // SAFETY: [`move_out`] guarentees that the destructors of [`ptr`] won't be ran,
@@ -320,10 +416,18 @@ mod val_complex {
                 _ => None,
             }
         }
+        pub fn get_compound(&self) -> Option<&[Val]> {
+            match self.extract_tag() {
+                ValComplexTag::Compound { len, .. } => {
+                    Some(unsafe { slice::from_raw_parts(self.data.cast().as_ptr(), *len) })
+                }
+                _ => None,
+            }
+        }
         /// Warning: may leak memory, as this doesn't run destructors
         pub(super) fn into_raw(self) -> NonNull<()> {
             let res = self.data;
-            std::mem::forget(self);
+            mem::forget(self);
             return res;
         }
         /// # Safety:
@@ -339,9 +443,27 @@ mod test {
     use crate::interp::value::{Val, ValComplex};
 
     #[test]
-    fn test_any() {
+    fn test_val_any() {
         let val = Val::new_complex(ValComplex::new_any(65u32));
         assert_eq!(val.complex().unwrap().get_any::<u32>().unwrap(), &65);
-        std::mem::forget(val);
+        let s: &'static str = "Hello world";
+        let val = Val::new_complex(ValComplex::new_any(s));
+        assert_eq!(
+            val.complex().unwrap().get_any::<&'static str>().unwrap(),
+            &s
+        );
+    }
+
+    #[test]
+    fn test_val_compound() {
+        let val = Val::new_complex(ValComplex::new_compound([
+            Val::new_usize(1),
+            Val::new_usize(2),
+        ]));
+        let val2 = val.clone();
+        assert!(
+            val.complex().unwrap().get_compound().unwrap()
+                == val2.complex().unwrap().get_compound().unwrap()
+        );
     }
 }
