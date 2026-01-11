@@ -1,7 +1,7 @@
-use crate::interp::value::{Val, ValComplex};
+use crate::value::{Val, ValComplex};
 
-mod interp;
 mod parse;
+mod value;
 
 fn main() {
     let val = Val::new_complex(ValComplex::new_compound([

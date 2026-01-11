@@ -8,7 +8,7 @@ use std::{
     sync::atomic::{fence, AtomicUsize, Ordering},
 };
 
-use crate::interp::value::{ref_utils::Owning, StaticBool, True, Val};
+use crate::value::{ref_utils::Owning, StaticBool, True, Val};
 
 enum ValComplexTag {
     Compound {

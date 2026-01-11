@@ -2,7 +2,7 @@ use std::{fmt::Debug, mem, ptr::NonNull};
 
 pub use val_complex::ValComplex;
 
-use crate::interp::value::static_bool::{StaticBool, True};
+use crate::value::static_bool::{StaticBool, True};
 
 pub mod ref_utils;
 
