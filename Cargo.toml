@@ -9,6 +9,7 @@ debug = true
 
 [dependencies]
 derive_more = { version = "2.1.0", features = ["from"] }
+jit-allocator2 = "0.2.9"
 nom = "8.0.0"
 stackalloc = "1.2.1"
 stacker = "0.1.22"
